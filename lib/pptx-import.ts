@@ -622,3 +622,315 @@ export async function importPptxBuffer(
       const cx = Number(getAttr(sldSz, "cx"));
       const cy = Number(getAttr(sldSz, "cy"));
       if (cx > 0 && cy > 0) {
+        slideCx = cx;
+        slideCy = cy;
+      }
+    }
+  }
+
+  const aspect = slideCx / slideCy;
+  const width = 1920;
+  const height = Math.max(600, Math.round(width / aspect));
+  const scaleX = width / slideCx;
+  const scaleY = height / slideCy;
+  const ptToPx = width / ((slideCx / EMU_PER_INCH) * 72);
+
+  // Cache compressed media data URLs by normalized zip path
+  const mediaCache = new Map<string, string>();
+  const getMediaDataUrl = async (baseXmlPath: string, relTarget: string): Promise<string | null> => {
+    const resolved = resolveRelPath(baseXmlPath, relTarget);
+    if (mediaCache.has(resolved)) return mediaCache.get(resolved)!;
+    const mediaFile =
+      zip.file(resolved) ??
+      zip.file(relTarget.replace(/^\.\.\//, "ppt/")) ??
+      zip.file(`ppt/media/${relTarget.split("/").pop() ?? ""}`);
+    if (!mediaFile) return null;
+    const mime = mimeFromExt(mediaFile.name);
+    const b64 = await mediaFile.async("base64");
+    const rawUrl = `data:${mime};base64,${b64}`;
+    const optimized = await compressDataUrlInBrowser(rawUrl, mime);
+    mediaCache.set(resolved, optimized);
+    return optimized;
+  };
+
+  // Extract slide background from a <p:bg> node
+  const extractBgFromDoc = async (
+    doc: XmlNode,
+    docPath: string,
+    rels: Map<string, RelEntry>,
+  ): Promise<{
+    background?: string;
+    backgroundGradientTo?: string;
+    backgroundGradientAngle?: number;
+    backgroundImage?: string;
+  }> => {
+    const bgNode = firstDescendant(doc, "bg");
+    if (!bgNode) return {};
+    const bgPr = directChild(bgNode, "bgPr");
+    if (bgPr) {
+      const blipFill = directChild(bgPr, "blipFill");
+      if (blipFill) {
+        const embedId = getBlipEmbedId(blipFill);
+        const rel = embedId ? rels.get(embedId) : undefined;
+        if (rel) {
+          const url = await getMediaDataUrl(docPath, rel.target);
+          if (url) return { backgroundImage: url };
+        }
+      }
+      const gradFill = directChild(bgPr, "gradFill");
+      if (gradFill) {
+        const g = extractGradFill(gradFill, themeColors);
+        if (g) {
+          return {
+            background: g.from,
+            backgroundGradientTo: g.to,
+            backgroundGradientAngle: g.angle,
+          };
+        }
+      }
+      const solid = directChild(bgPr, "solidFill");
+      if (solid) {
+        const c = extractColorInfo(solid, themeColors);
+        if (c) return { background: c.color };
+      }
+    }
+    const bgRef = directChild(bgNode, "bgRef");
+    if (bgRef) {
+      const c = extractColorInfo(bgRef, themeColors);
+      if (c) return { background: c.color };
+    }
+    return {};
+  };
+
+  // Parse a shape tree (used for slide, slideLayout, and recursive grpSp)
+  const parseTreeChildren = async (
+    children: XmlNode[],
+    ctx: TransformContext,
+    docPath: string,
+    rels: Map<string, RelEntry>,
+    options: {
+      isLayoutOrMaster?: boolean;
+      onFullBleedBgImage?: (dataUrl: string) => void;
+    },
+    out: CanvasElement[],
+  ) => {
+    for (const child of children) {
+      const tag = child.localName;
+
+      // Skip placeholder templates on layouts/masters
+      if (options.isLayoutOrMaster && isPlaceholderShape(child)) continue;
+
+      if (tag === "grpSp") {
+        const grpSpPr = directChild(child, "grpSpPr");
+        const xfrm = directChild(grpSpPr, "xfrm");
+        const off = directChild(xfrm, "off");
+        const ext = directChild(xfrm, "ext");
+        const chOff = directChild(xfrm, "chOff");
+        const chExt = directChild(xfrm, "chExt");
+
+        const gx = Number(getAttr(off, "x") ?? 0) || 0;
+        const gy = Number(getAttr(off, "y") ?? 0) || 0;
+        const gcx = Number(getAttr(ext, "cx") ?? 0) || 0;
+        const gcy = Number(getAttr(ext, "cy") ?? 0) || 0;
+        const cox = Number(getAttr(chOff, "x") ?? 0) || 0;
+        const coy = Number(getAttr(chOff, "y") ?? 0) || 0;
+        const ccx = Number(getAttr(chExt, "cx") ?? 0) || 0;
+        const ccy = Number(getAttr(chExt, "cy") ?? 0) || 0;
+
+        const childCtx: TransformContext =
+          gcx > 0 && gcy > 0 && ccx > 0 && ccy > 0
+            ? {
+                mapX: (emuX) => ctx.mapX(gx + ((emuX - cox) * gcx) / ccx),
+                mapY: (emuY) => ctx.mapY(gy + ((emuY - coy) * gcy) / ccy),
+                scaleX: (ctx.scaleX * gcx) / ccx,
+                scaleY: (ctx.scaleY * gcy) / ccy,
+              }
+            : ctx;
+
+        await parseTreeChildren(child.children, childCtx, docPath, rels, options, out);
+        continue;
+      }
+
+      if (tag === "pic") {
+        const box = parseXfrm(child, ctx);
+        if (!box) continue;
+        const embedId = getBlipEmbedId(child);
+        const rel = embedId ? rels.get(embedId) : undefined;
+        if (!rel) continue;
+        const dataUrl = await getMediaDataUrl(docPath, rel.target);
+        if (!dataUrl) continue;
+
+        // If this is a full-bleed background picture from a slideLayout/slideMaster,
+        // promote it to page.backgroundImage so it stays cleanly anchored behind everything.
+        if (
+          options.isLayoutOrMaster &&
+          options.onFullBleedBgImage &&
+          box.x <= 24 &&
+          box.y <= 24 &&
+          box.w >= width * 0.92 &&
+          box.h >= height * 0.92
+        ) {
+          options.onFullBleedBgImage(dataUrl);
+          continue;
+        }
+
+        const spPr = directChild(child, "spPr");
+        const prst = getAttr(directChild(spPr, "prstGeom"), "prst") ?? "rect";
+        let borderRadius = 0;
+        if (prst === "roundRect") {
+          const gd = firstDescendant(directChild(spPr, "prstGeom"), "gd");
+          const fmla = getAttr(gd, "fmla") ?? "";
+          const adjVal = Number(fmla.replace(/^val\s+/i, ""));
+          const frac = !Number.isNaN(adjVal) && adjVal > 0 ? adjVal / 100000 : 0.12;
+          borderRadius = Math.round(frac * Math.min(box.w, box.h));
+        }
+
+        out.push({
+          id: makeId("el"),
+          type: "image",
+          name: extractNodeName(child, "Imported Image"),
+          src: dataUrl,
+          x: box.x,
+          y: box.y,
+          width: Math.max(8, box.w),
+          height: Math.max(8, box.h),
+          rotation: box.rotation,
+          opacity: 1,
+          flipX: box.flipX || undefined,
+          flipY: box.flipY || undefined,
+          fit: "cover",
+          borderRadius,
+          mask: prst === "ellipse" ? "circle" : "none",
+          filters: { ...DEFAULT_IMAGE_FILTERS },
+        });
+        continue;
+      }
+
+      if (tag === "cxnSp") {
+        const box = parseXfrm(child, ctx);
+        if (!box) continue;
+        const spPr = directChild(child, "spPr");
+        const ln = directChild(spPr, "ln");
+        const strokeInfo = extractColorInfo(directChild(ln, "solidFill"), themeColors);
+        if (!strokeInfo) continue;
+        const lnW = Number(getAttr(ln, "w") ?? 12700);
+        const strokeWidth = Math.max(1, Math.round(lnW * ctx.scaleX));
+        out.push({
+          id: makeId("el"),
+          type: "shape",
+          name: extractNodeName(child, "Line"),
+          shape: "line",
+          x: box.x,
+          y: box.y,
+          width: Math.max(4, box.w),
+          height: Math.max(strokeWidth + 4, box.h),
+          rotation: box.rotation,
+          opacity: strokeInfo.opacity,
+          fill: "transparent",
+          stroke: strokeInfo.color,
+          strokeWidth,
+        });
+        continue;
+      }
+
+      if (tag === "graphicFrame") {
+        const tblEl = extractTableElement(child, ctx, ptToPx, themeColors);
+        if (tblEl) out.push(tblEl);
+        continue;
+      }
+
+      if (tag === "sp") {
+        const box = parseXfrm(child, ctx);
+        if (!box) continue;
+        const spPr = directChild(child, "spPr");
+        const prstGeom = directChild(spPr, "prstGeom");
+        const prst = getAttr(prstGeom, "prst") ?? "rect";
+
+        // Shape fill: solidFill, gradFill, or blipFill
+        const solidFillNode = directChild(spPr, "solidFill");
+        const gradFillNode = directChild(spPr, "gradFill");
+        const noFillNode = directChild(spPr, "noFill");
+        const solidInfo = !noFillNode ? extractColorInfo(solidFillNode, themeColors) : null;
+        const gradInfo = !noFillNode && !solidInfo ? extractGradFill(gradFillNode, themeColors) : null;
+
+        // Shape border (<a:ln>)
+        const ln = directChild(spPr, "ln");
+        const lnNoFill = !!directChild(ln, "noFill");
+        const strokeInfo = !lnNoFill ? extractColorInfo(directChild(ln, "solidFill"), themeColors) : null;
+        const lnWEmu = Number(getAttr(ln, "w") ?? 12700);
+        const strokeWidth = strokeInfo ? Math.max(1, Math.round(lnWEmu * ctx.scaleX)) : 0;
+        const dashVal = getAttr(directChild(ln, "prstDash"), "val") ?? "solid";
+        const strokeDash: "solid" | "dashed" | "dotted" =
+          dashVal.toLowerCase().includes("dot") && !dashVal.toLowerCase().includes("dash")
+            ? "dotted"
+            : dashVal.toLowerCase().includes("dash")
+              ? "dashed"
+              : "solid";
+
+        // Corner radius for roundRect
+        let borderRadius = 0;
+        if (prst === "roundRect") {
+          const gd = firstDescendant(prstGeom, "gd");
+          const fmla = getAttr(gd, "fmla") ?? "";
+          const adjVal = Number(fmla.replace(/^val\s+/i, ""));
+          const frac = !Number.isNaN(adjVal) && adjVal >= 0 ? adjVal / 100000 : 0.12;
+          borderRadius = Math.round(frac * Math.min(box.w, box.h));
+        }
+
+        const shapeKind = mapPresetShape(prst);
+        const hasFill = !!(solidInfo || gradInfo);
+        const hasStroke = !!strokeInfo;
+
+        if (hasFill || hasStroke) {
+          out.push({
+            id: makeId("el"),
+            type: "shape",
+            name: extractNodeName(child, "Shape"),
+            shape: shapeKind,
+            x: box.x,
+            y: box.y,
+            width: Math.max(2, box.w),
+            height: Math.max(2, box.h),
+            rotation: box.rotation,
+            opacity: solidInfo?.opacity ?? gradInfo?.opacity ?? strokeInfo?.opacity ?? 1,
+            flipX: box.flipX || undefined,
+            flipY: box.flipY || undefined,
+            fill: solidInfo?.color ?? gradInfo?.from ?? "transparent",
+            gradientTo: gradInfo?.to,
+            gradientAngle: gradInfo?.angle,
+            stroke: strokeInfo?.color ?? "transparent",
+            strokeWidth,
+            strokeDash: strokeWidth > 0 ? strokeDash : undefined,
+            borderRadius,
+          });
+        }
+
+        // Extract text body
+        const txBody = directChild(child, "txBody");
+        if (txBody) {
+          const bodyPr = directChild(txBody, "bodyPr");
+          const wrapMode = getAttr(bodyPr, "wrap") ?? "square";
+          const lIns = Math.round((Number(getAttr(bodyPr, "lIns") ?? 0) || 0) * ctx.scaleX);
+          const rIns = Math.round((Number(getAttr(bodyPr, "rIns") ?? 0) || 0) * ctx.scaleX);
+          const tIns = Math.round((Number(getAttr(bodyPr, "tIns") ?? 0) || 0) * ctx.scaleY);
+          const bIns = Math.round((Number(getAttr(bodyPr, "bIns") ?? 0) || 0) * ctx.scaleY);
+          const normAutofit = directChild(bodyPr, "normAutofit");
+          const fontScaleAttr = Number(getAttr(normAutofit, "fontScale") ?? 100000);
+          const autofitScale =
+            fontScaleAttr > 0 && fontScaleAttr < 100000 ? fontScaleAttr / 100000 : 1;
+
+          const paragraphs = directChildren(txBody, "p");
+          const lines: string[] = [];
+
+          // Track dominant style from the first non-empty run (most accurate for headings/body)
+          let stylePicked = false;
+          let fontSizePx = Math.round(16 * ptToPx);
+          let fontFamily = "Inter";
+          let fontWeight = 400;
+          let italic = false;
+          let underline = false;
+          let strikethrough = false;
+          let textTransform: "none" | "uppercase" | "lowercase" = "none";
+          let color = "#111114";
+          let align: "left" | "center" | "right" = "left";
+          let letterSpacing = 0;
