@@ -354,3 +354,359 @@ export function StudioEditor({
   );
 
   const handleUpdateElement = useCallback(
+    (id: string, patch: Partial<CanvasElement>, commit = false) => {
+      setPages((prev) => {
+        const next = prev.map((p, idx) =>
+          idx === activePageIdx
+            ? {
+                ...p,
+                elements: p.elements.map((el) =>
+                  el.id === id ? ({ ...el, ...patch } as CanvasElement) : el,
+                ),
+              }
+            : p,
+        );
+        if (commit) pushHistory(next);
+        return next;
+      });
+      setSaveStatus("unsaved");
+    },
+    [activePageIdx, pushHistory],
+  );
+
+  const handleDeleteElements = useCallback(
+    (ids: string[]) => {
+      if (!ids.length) return;
+      setPages((prev) => {
+        const next = prev.map((p, idx) =>
+          idx === activePageIdx
+            ? { ...p, elements: p.elements.filter((el) => !ids.includes(el.id)) }
+            : p,
+        );
+        pushHistory(next);
+        return next;
+      });
+      setSelectedIds([]);
+    },
+    [activePageIdx, pushHistory],
+  );
+
+  const handleDuplicateSelected = useCallback(() => {
+    if (!selectedIds.length) return;
+    const clones = activePage.elements
+      .filter((el) => selectedIds.includes(el.id))
+      .map((el) => ({
+        ...JSON.parse(JSON.stringify(el)),
+        id: makeId("el"),
+        x: el.x + 28,
+        y: el.y + 28,
+        groupId: undefined,
+      })) as CanvasElement[];
+    setPages((prev) => {
+      const next = prev.map((p, idx) =>
+        idx === activePageIdx ? { ...p, elements: [...p.elements, ...clones] } : p,
+      );
+      pushHistory(next);
+      return next;
+    });
+    setSelectedIds(clones.map((c) => c.id));
+  }, [activePage.elements, activePageIdx, selectedIds, pushHistory]);
+
+  const handleGroupToggle = useCallback(() => {
+    if (!selectedElements.length) return;
+    const allGrouped = selectedElements.every((e) => !!e.groupId);
+    const gid = allGrouped ? undefined : makeId("grp");
+    setPages((prev) => {
+      const next = prev.map((p, idx) =>
+        idx === activePageIdx
+          ? {
+              ...p,
+              elements: p.elements.map((el) =>
+                selectedIds.includes(el.id) ? { ...el, groupId: gid } : el,
+              ),
+            }
+          : p,
+      );
+      pushHistory(next);
+      return next;
+    });
+  }, [activePageIdx, selectedElements, selectedIds, pushHistory]);
+
+  const handleAlign = useCallback(
+    (mode: "left" | "centerX" | "right" | "top" | "centerY" | "bottom") => {
+      if (!selectedIds.length) return;
+      setPages((prev) => {
+        const next = prev.map((p, idx) =>
+          idx === activePageIdx
+            ? {
+                ...p,
+                elements: p.elements.map((el) => {
+                  if (!selectedIds.includes(el.id) || el.locked) return el;
+                  if (mode === "left") return { ...el, x: 0 };
+                  if (mode === "centerX") return { ...el, x: Math.round((width - el.width) / 2) };
+                  if (mode === "right") return { ...el, x: width - el.width };
+                  if (mode === "top") return { ...el, y: 0 };
+                  if (mode === "centerY") return { ...el, y: Math.round((height - el.height) / 2) };
+                  return { ...el, y: height - el.height };
+                }),
+              }
+            : p,
+        );
+        pushHistory(next);
+        return next;
+      });
+    },
+    [activePageIdx, height, width, selectedIds, pushHistory],
+  );
+
+  const handleReorderLayer = useCallback(
+    (id: string, dir: "up" | "down") => {
+      setPages((prev) => {
+        const next = prev.map((p, idx) => {
+          if (idx !== activePageIdx) return p;
+          const arr = [...p.elements];
+          const pos = arr.findIndex((e) => e.id === id);
+          if (pos === -1) return p;
+          const target = dir === "up" ? Math.min(arr.length - 1, pos + 1) : Math.max(0, pos - 1);
+          const [moved] = arr.splice(pos, 1);
+          arr.splice(target, 0, moved);
+          return { ...p, elements: arr };
+        });
+        pushHistory(next);
+        return next;
+      });
+    },
+    [activePageIdx, pushHistory],
+  );
+
+  const handleCopyStyle = useCallback(() => {
+    if (!singleSelected) return;
+    if (singleSelected.type === "text") {
+      setCopiedStyle({
+        fontFamily: singleSelected.fontFamily,
+        fontWeight: singleSelected.fontWeight,
+        color: singleSelected.color,
+        italic: singleSelected.italic,
+        letterSpacing: singleSelected.letterSpacing,
+      } as Partial<CanvasElement>);
+    } else if (singleSelected.type === "shape") {
+      setCopiedStyle({
+        fill: singleSelected.fill,
+        gradientTo: singleSelected.gradientTo,
+        stroke: singleSelected.stroke,
+        strokeWidth: singleSelected.strokeWidth,
+        borderRadius: singleSelected.borderRadius,
+      } as Partial<CanvasElement>);
+    } else if (singleSelected.type === "image") {
+      setCopiedStyle({
+        filters: singleSelected.filters,
+        borderRadius: singleSelected.borderRadius,
+        mask: singleSelected.mask,
+      } as Partial<CanvasElement>);
+    }
+    notify("Style copied");
+  }, [singleSelected, notify]);
+
+  const handlePasteStyle = useCallback(() => {
+    if (!copiedStyle || !singleSelected) return;
+    handleUpdateElement(singleSelected.id, copiedStyle, true);
+    notify("Style applied");
+  }, [copiedStyle, singleSelected, handleUpdateElement, notify]);
+
+  const styleShuffleRef = useRef<{ key: string; variant: number }>({ key: "", variant: 0 });
+
+  const handleUpdateBrandKit = useCallback(
+    async (nextKit: BrandKit) => {
+      const updated: BrandKit = { ...nextKit, updatedAt: Date.now() };
+      setBrandKit(updated);
+      try {
+        await fetch("/api/brand-kit", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated),
+        });
+      } catch {
+        // keep optimistic local state
+      }
+    },
+    [],
+  );
+
+  const handleApplyBrandStyle = useCallback(
+    (opts?: {
+      mode?: "all" | "colors" | "fonts";
+      scope?: "page" | "deck";
+      colors?: string[];
+      label?: string;
+    }) => {
+      const mode = opts?.mode ?? "all";
+      const scope = opts?.scope ?? "page";
+      const colors = opts?.colors ?? brandKit.colors;
+      const applyColors = mode === "all" || mode === "colors";
+      const applyFonts = mode === "all" || mode === "fonts";
+
+      const key = `${mode}:${scope}:${opts?.label ?? "brand"}:${colors.join(",")}`;
+      const nextVariant =
+        applyColors && styleShuffleRef.current.key === key
+          ? (styleShuffleRef.current.variant + 1) % 3
+          : 0;
+      styleShuffleRef.current = { key, variant: nextVariant };
+
+      setPages((prev) => {
+        const next = prev.map((p, idx) => {
+          if (scope === "page" && idx !== activePageIdx) return p;
+          return applyStyleToPage(p, {
+            colors,
+            fonts: {
+              heading: brandKit.fonts.heading,
+              body: brandKit.fonts.body,
+            },
+            applyColors,
+            applyFonts,
+            variant: nextVariant,
+            pageWidth: width,
+            pageHeight: height,
+          });
+        });
+        pushHistory(next);
+        return next;
+      });
+
+      const targetLabel =
+        scope === "deck" && pages.length > 1 ? `all ${pages.length} pages` : "this page";
+      if (mode === "fonts") {
+        notify(`Applied brand fonts to ${targetLabel}`);
+      } else if (opts?.label) {
+        notify(
+          `Applied ${opts.label} to ${targetLabel}${nextVariant > 0 ? ` (variation ${nextVariant + 1})` : ""}`,
+        );
+      } else {
+        notify(
+          `Applied brand ${mode === "colors" ? "colors" : "style"} to ${targetLabel}${nextVariant > 0 ? ` (variation ${nextVariant + 1})` : ""}`,
+        );
+      }
+    },
+    [activePageIdx, brandKit, height, pages.length, pushHistory, width, notify],
+  );
+
+  const handleApplySwatchColor = useCallback(
+    (color: string) => {
+      if (selectedIds.length === 0) {
+        updateActivePage({ background: color, backgroundGradientTo: undefined });
+        notify(`Page background set to ${color}`);
+        return;
+      }
+
+      setPages((prev) => {
+        const next = prev.map((p, idx) => {
+          if (idx !== activePageIdx) return p;
+          return {
+            ...p,
+            elements: p.elements.map((el) => {
+              if (!selectedIds.includes(el.id)) return el;
+              if (el.type === "text") return { ...el, color };
+              if (el.type === "shape") {
+                if (el.shape === "line" || el.shape === "arrow") {
+                  return { ...el, fill: color, stroke: color };
+                }
+                if (el.fill === "transparent" || el.fill === "none") {
+                  return { ...el, stroke: color };
+                }
+                return { ...el, fill: color, gradientTo: undefined };
+              }
+              if (el.type === "icon") return { ...el, color };
+              if (el.type === "draw") return { ...el, color };
+              if (el.type === "chart") return { ...el, accentColor: color };
+              if (el.type === "table") return { ...el, headerBg: color };
+              if (el.type === "qrcode") return { ...el, fgColor: color };
+              return el;
+            }),
+          };
+        });
+        pushHistory(next);
+        return next;
+      });
+    },
+    [activePageIdx, selectedIds, pushHistory, updateActivePage, notify],
+  );
+
+  const handleApplyBrandFont = useCallback(
+    (font: string): boolean => {
+      const hasTextOrTable = selectedElements.some(
+        (el) => el.type === "text" || el.type === "table",
+      );
+      if (!hasTextOrTable) return false;
+      setPages((prev) => {
+        const next = prev.map((p, idx) => {
+          if (idx !== activePageIdx) return p;
+          return {
+            ...p,
+            elements: p.elements.map((el) => {
+              if (!selectedIds.includes(el.id)) return el;
+              if (el.type === "text" || el.type === "table") {
+                return { ...el, fontFamily: font };
+              }
+              return el;
+            }),
+          };
+        });
+        pushHistory(next);
+        return next;
+      });
+      notify(`Font set to ${font}`);
+      return true;
+    },
+    [activePageIdx, selectedElements, selectedIds, pushHistory, notify],
+  );
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (readOnly) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === "0") {
+        e.preventDefault();
+        setAutoFit(true);
+        const fit = computeFitZoom();
+        if (fit !== null) setZoom(fit);
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        handleDuplicateSelected();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        handleGroupToggle();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "c" && selectedIds.length) {
+        clipboardRef.current = JSON.parse(JSON.stringify(selectedElements)) as CanvasElement[];
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "v" && clipboardRef.current.length) {
+        e.preventDefault();
+        const pasted = clipboardRef.current.map((el) => ({
+          ...JSON.parse(JSON.stringify(el)),
+          id: makeId("el"),
+          x: el.x + 24,
+          y: el.y + 24,
+        })) as CanvasElement[];
+        setPages((prev) => {
+          const next = prev.map((p, idx) =>
+            idx === activePageIdx ? { ...p, elements: [...p.elements, ...pasted] } : p,
+          );
+          pushHistory(next);
+          return next;
+        });
