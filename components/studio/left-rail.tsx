@@ -1174,3 +1174,394 @@ export function LeftRail({
                                   <X className="h-2 w-2" />
                                 </button>
                               )}
+                            </div>
+                          ))}
+                          {brandKit.colors.length < 8 && (
+                            <button
+                              onClick={() =>
+                                void onUpdateBrandKit({
+                                  ...brandKit,
+                                  colors: [...brandKit.colors, "#2563EB"],
+                                })
+                              }
+                              title="Add color"
+                              className="flex h-7 w-7 items-center justify-center rounded-md border border-dashed border-[var(--border)] text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div>
+                          <label className="text-[10px] font-medium text-[var(--muted)]">
+                            Heading font
+                          </label>
+                          <select
+                            value={brandKit.fonts.heading}
+                            onChange={(e) =>
+                              void onUpdateBrandKit({
+                                ...brandKit,
+                                fonts: { ...brandKit.fonts, heading: e.target.value },
+                              })
+                            }
+                            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--fg)] outline-none"
+                          >
+                            {GOOGLE_FONTS.map((f) => (
+                              <option key={f.name} value={f.name}>
+                                {f.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-[var(--muted)]">
+                            Body font
+                          </label>
+                          <select
+                            value={brandKit.fonts.body}
+                            onChange={(e) =>
+                              void onUpdateBrandKit({
+                                ...brandKit,
+                                fonts: { ...brandKit.fonts, body: e.target.value },
+                              })
+                            }
+                            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--fg)] outline-none"
+                          >
+                            {GOOGLE_FONTS.map((f) => (
+                              <option key={f.name} value={f.name}>
+                                {f.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--muted)]">
+                        Apply your brand palette or typography while preserving layout &amp; text contrast. Click again to shuffle.
+                      </p>
+
+                      {pageCount > 1 && (
+                        <div className="mt-2.5 grid grid-cols-2 gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-0.5 text-[11px]">
+                          <button
+                            onClick={() => setApplyScope("page")}
+                            className={`rounded-md py-1 font-medium transition cursor-pointer ${
+                              applyScope === "page"
+                                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                                : "text-[var(--muted)] hover:text-[var(--fg)]"
+                            }`}
+                          >
+                            This page
+                          </button>
+                          <button
+                            onClick={() => setApplyScope("deck")}
+                            className={`rounded-md py-1 font-medium transition cursor-pointer ${
+                              applyScope === "deck"
+                                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                                : "text-[var(--muted)] hover:text-[var(--fg)]"
+                            }`}
+                          >
+                            All {pageCount} pages
+                          </button>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() =>
+                          onApplyBrandStyle({ mode: "all", scope: applyScope })
+                        }
+                        className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] py-2 font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+                      >
+                        <Shuffle className="h-3.5 w-3.5" /> Apply Brand Style
+                      </button>
+
+                      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                        <button
+                          onClick={() =>
+                            onApplyBrandStyle({ mode: "colors", scope: applyScope })
+                          }
+                          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1.5 text-[11px] font-medium text-[var(--fg)] hover:border-[var(--border-strong)] cursor-pointer"
+                        >
+                          Colors only
+                        </button>
+                        <button
+                          onClick={() =>
+                            onApplyBrandStyle({ mode: "fonts", scope: applyScope })
+                          }
+                          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1.5 text-[11px] font-medium text-[var(--fg)] hover:border-[var(--border-strong)] cursor-pointer"
+                        >
+                          Fonts only
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Brand Colors */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="font-semibold text-[var(--fg)]">Brand Colors</span>
+                    <span className="text-[10px] text-[var(--muted)]">
+                      {selectedIds.length > 0 ? "Recolor selection" : "Set background"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {brandKit.colors.map((c, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => onApplySwatchColor(c)}
+                        title={
+                          selectedIds.length > 0
+                            ? `Apply ${c} to selection`
+                            : `Set page background to ${c}`
+                        }
+                        className="h-8 w-8 rounded-lg border border-black/15 shadow-xs transition hover:scale-105 cursor-pointer"
+                        style={{ background: c }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Brand Fonts */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="font-semibold text-[var(--fg)]">Brand Fonts</span>
+                    <span className="text-[10px] text-[var(--muted)]">
+                      {hasSelectedText ? "Apply to text" : "Add to canvas"}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {(
+                      [
+                        { kind: "heading" as const, label: "Heading", font: brandKit.fonts.heading },
+                        { kind: "body" as const, label: "Body", font: brandKit.fonts.body },
+                      ]
+                    ).map((slot) => (
+                      <div
+                        key={slot.kind}
+                        className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pr-1.5 transition hover:border-[var(--border-strong)]"
+                      >
+                        <button
+                          onClick={() => {
+                            const applied = onApplyBrandFont(slot.font);
+                            if (!applied) addText(slot.kind, slot.font);
+                          }}
+                          className="min-w-0 flex-1 px-3 py-2 text-left cursor-pointer"
+                        >
+                          <div className="text-[10px] text-[var(--muted)]">{slot.label}</div>
+                          <div
+                            className={`truncate text-[var(--fg)] ${
+                              slot.kind === "heading" ? "text-sm font-bold" : "text-xs"
+                            }`}
+                            style={{ fontFamily: `"${slot.font}", sans-serif` }}
+                          >
+                            {slot.font}
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => addText(slot.kind, slot.font)}
+                          title={`Insert new ${slot.label.toLowerCase()} in ${slot.font}`}
+                          className="rounded-md p-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--fg)] cursor-pointer"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Brand Logos */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between font-semibold text-[var(--fg)]">
+                    <span>Brand Logos</span>
+                    <div className="flex items-center gap-2 text-[11px] font-medium">
+                      <button
+                        onClick={() => brandLogoRef.current?.click()}
+                        className="text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                      >
+                        Upload
+                      </button>
+                      <button
+                        onClick={onOpenLogoMaker}
+                        className="text-[var(--fg)] hover:underline cursor-pointer"
+                      >
+                        + Create
+                      </button>
+                    </div>
+                  </div>
+                  {brandKit.logos.length === 0 ? (
+                    <p className="text-[11px] text-[var(--muted)]">
+                      No brand logos saved yet. Upload one or generate a vector mark in Logo Studio.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      {brandKit.logos.map((logo) => (
+                        <button
+                          key={logo.id}
+                          onClick={() => insertImageOnCanvas(logo.dataUrl, logo.name, 500, 500)}
+                          title={`Insert ${logo.name}`}
+                          className="flex aspect-square items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2 hover:border-[var(--border-strong)] cursor-pointer"
+                        >
+                          <img
+                            src={logo.dataUrl}
+                            alt={logo.name}
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick Color Palettes */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="font-semibold text-[var(--fg)]">Color Palettes</span>
+                    <span className="text-[10px] text-[var(--muted)]">Click to apply</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {SWATCH_PALETTES.map((p) => (
+                      <div
+                        key={p.name}
+                        className="group flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pr-1 transition hover:border-[var(--border-strong)]"
+                      >
+                        <button
+                          onClick={() =>
+                            onApplyBrandStyle({
+                              mode: "colors",
+                              scope: applyScope,
+                              colors: p.colors,
+                              label: p.name,
+                            })
+                          }
+                          title={`Apply ${p.name} colors (click again to shuffle)`}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2.5 py-2 text-left cursor-pointer"
+                        >
+                          <span className="truncate text-[11px] font-medium text-[var(--fg)]">
+                            {p.name}
+                          </span>
+                          <div className="flex shrink-0 gap-1">
+                            {p.colors.map((c) => (
+                              <span
+                                key={c}
+                                className="h-3.5 w-3.5 rounded-full border border-black/15"
+                                style={{ background: c }}
+                              />
+                            ))}
+                          </div>
+                        </button>
+                        <button
+                          onClick={() =>
+                            void onUpdateBrandKit({
+                              ...brandKit,
+                              colors: [...p.colors],
+                            })
+                          }
+                          title={`Save ${p.name} as your Brand Colors`}
+                          className="hidden shrink-0 rounded px-1.5 py-1 text-[10px] font-medium text-[var(--muted)] group-hover:inline-flex hover:bg-[var(--surface)] hover:text-[var(--fg)] cursor-pointer"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* LAYERS */}
+            {activeTab === "layers" && (
+              <div className="space-y-1.5">
+                {page.elements.length === 0 ? (
+                  <p className="py-8 text-center text-xs text-[var(--muted)]">
+                    No elements on this page yet.
+                  </p>
+                ) : (
+                  [...page.elements].reverse().map((el) => {
+                    const selected = selectedIds.includes(el.id);
+                    return (
+                      <div
+                        key={el.id}
+                        onClick={() => onSelect([el.id])}
+                        className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-xs transition cursor-pointer ${
+                          selected
+                            ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--fg)]"
+                            : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)]"
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium">
+                            {el.name || (el.type === "text" ? el.text.slice(0, 20) : el.type)}
+                          </div>
+                          <div className="text-[10px] capitalize text-[var(--muted)]">
+                            {el.type}
+                            {el.groupId ? " • Grouped" : ""}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onReorderLayer(el.id, "up");
+                            }}
+                            title="Bring Forward"
+                            className="rounded p-1 text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            <ArrowUp className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onReorderLayer(el.id, "down");
+                            }}
+                            title="Send Backward"
+                            className="rounded p-1 text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            <ArrowDown className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onUpdateElement(el.id, { hidden: !el.hidden }, true);
+                            }}
+                            title={el.hidden ? "Show" : "Hide"}
+                            className="rounded p-1 text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            {el.hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onUpdateElement(el.id, { locked: !el.locked }, true);
+                            }}
+                            title={el.locked ? "Unlock" : "Lock"}
+                            className="rounded p-1 text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            {el.locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteElements([el.id]);
+                            }}
+                            title="Delete"
+                            className="rounded p-1 text-[var(--muted)] hover:text-rose-500 cursor-pointer"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
