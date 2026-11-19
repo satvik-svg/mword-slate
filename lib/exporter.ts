@@ -232,3 +232,237 @@ function renderTextElement(ctx: CanvasRenderingContext2D, el: TextElement) {
     (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${el.letterSpacing}px`;
   }
 
+  if (el.shadowColor && el.shadowBlur) {
+    ctx.shadowColor = el.shadowColor;
+    ctx.shadowBlur = el.shadowBlur;
+    ctx.shadowOffsetX = el.shadowOffsetX ?? 0;
+    ctx.shadowOffsetY = el.shadowOffsetY ?? 4;
+  }
+
+  const lines = wrapLines(ctx, rawText, Math.max(20, el.width));
+  const lineH = el.fontSize * (el.lineHeight || 1.2);
+  ctx.textAlign = el.align;
+  const xPos = el.align === "center" ? el.width / 2 : el.align === "right" ? el.width : 0;
+
+  lines.forEach((line, idx) => {
+    const yPos = idx * lineH;
+    if (el.strokeColor && el.strokeWidth) {
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth;
+      ctx.strokeText(line, xPos, yPos);
+    }
+    ctx.fillText(line, xPos, yPos);
+    if (el.underline || el.strikethrough) {
+      const m = ctx.measureText(line);
+      const lx =
+        el.align === "center"
+          ? xPos - m.width / 2
+          : el.align === "right"
+            ? xPos - m.width
+            : xPos;
+      ctx.beginPath();
+      ctx.strokeStyle = el.color;
+      ctx.lineWidth = Math.max(1.5, el.fontSize * 0.06);
+      const ly = el.underline ? yPos + el.fontSize * 1.04 : yPos + el.fontSize * 0.56;
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(lx + m.width, ly);
+      ctx.stroke();
+    }
+  });
+}
+
+function renderShapeElement(ctx: CanvasRenderingContext2D, el: ShapeElement) {
+  traceShapePath(ctx, el);
+  if (el.shape !== "line" && el.fill && el.fill !== "transparent") {
+    ctx.fillStyle = el.gradientTo
+      ? makeLinearGradient(ctx, el.width, el.height, el.fill, el.gradientTo, el.gradientAngle)
+      : el.fill;
+    ctx.fill();
+  }
+  if ((el.stroke && el.stroke !== "transparent" && el.strokeWidth > 0) || el.shape === "line") {
+    ctx.strokeStyle = el.stroke && el.stroke !== "transparent" ? el.stroke : el.fill;
+    ctx.lineWidth = Math.max(1, el.strokeWidth || 4);
+    if (el.strokeDash === "dashed") ctx.setLineDash([12, 8]);
+    else if (el.strokeDash === "dotted") ctx.setLineDash([3, 6]);
+    ctx.stroke();
+  }
+}
+
+async function renderImageElement(ctx: CanvasRenderingContext2D, el: ImageElement) {
+  try {
+    const img = await loadImage(el.src);
+    ctx.save();
+    // Apply mask clip
+    if (el.mask === "circle") {
+      ctx.beginPath();
+      ctx.ellipse(el.width / 2, el.height / 2, el.width / 2, el.height / 2, 0, 0, Math.PI * 2);
+      ctx.clip();
+    } else if (el.mask === "arch") {
+      ctx.beginPath();
+      ctx.arc(el.width / 2, el.width / 2, el.width / 2, Math.PI, 0, false);
+      ctx.lineTo(el.width, el.height);
+      ctx.lineTo(0, el.height);
+      ctx.closePath();
+      ctx.clip();
+    } else if (el.mask === "hexagon") {
+      buildPolygonPath(ctx, el.width / 2, el.height / 2, el.width / 2, el.height / 2, 6, -30);
+      ctx.clip();
+    } else if (el.mask === "star") {
+      buildStarPath(ctx, el.width / 2, el.height / 2, el.width / 2, el.height / 2, 5);
+      ctx.clip();
+    } else if (el.mask === "blob") {
+      traceShapePath(ctx, {
+        ...el,
+        type: "shape",
+        shape: "blob",
+        fill: "#000",
+        stroke: "transparent",
+        strokeWidth: 0,
+      });
+      ctx.clip();
+    } else {
+      const r = el.mask === "rounded" ? 36 : el.mask === "phone" ? 38 : el.borderRadius || 0;
+      drawRoundedRect(ctx, 0, 0, el.width, el.height, r);
+      ctx.clip();
+    }
+
+    ctx.filter = cssFilterFromImageFilters(el.filters);
+
+    // Draw image with cover or contain
+    const imgRatio = (img.naturalWidth || 1) / (img.naturalHeight || 1);
+    const boxRatio = el.width / Math.max(1, el.height);
+    let dx = 0;
+    let dy = 0;
+    let dw = el.width;
+    let dh = el.height;
+    if (el.fit === "cover") {
+      if (imgRatio > boxRatio) {
+        dw = el.height * imgRatio;
+        dx = (el.width - dw) / 2;
+      } else {
+        dh = el.width / imgRatio;
+        dy = (el.height - dh) / 2;
+      }
+    } else {
+      if (imgRatio > boxRatio) {
+        dh = el.width / imgRatio;
+        dy = (el.height - dh) / 2;
+      } else {
+        dw = el.height * imgRatio;
+        dx = (el.width - dw) / 2;
+      }
+    }
+    ctx.drawImage(img, dx, dy, dw, dh);
+    ctx.filter = "none";
+
+    // Vignette
+    if (el.filters?.vignette > 0) {
+      const grad = ctx.createRadialGradient(
+        el.width / 2,
+        el.height / 2,
+        Math.min(el.width, el.height) * 0.25,
+        el.width / 2,
+        el.height / 2,
+        Math.max(el.width, el.height) * 0.72,
+      );
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(1, `rgba(0,0,0,${(el.filters.vignette / 100) * 0.75})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, el.width, el.height);
+    }
+
+    ctx.restore();
+
+    if (el.mask === "phone") {
+      ctx.strokeStyle = "#0F172A";
+      ctx.lineWidth = Math.max(8, el.width * 0.045);
+      drawRoundedRect(ctx, 0, 0, el.width, el.height, 38);
+      ctx.stroke();
+    } else if (el.stroke && el.strokeWidth) {
+      ctx.strokeStyle = el.stroke;
+      ctx.lineWidth = el.strokeWidth;
+      drawRoundedRect(ctx, 0, 0, el.width, el.height, el.borderRadius || 0);
+      ctx.stroke();
+    }
+  } catch {
+    // Ignore unloaded broken image
+  }
+}
+
+function renderIconElement(ctx: CanvasRenderingContext2D, el: IconElement) {
+  const icon = getVectorIcon(el.iconId);
+  ctx.save();
+  ctx.scale(el.width / 24, el.height / 24);
+  ctx.strokeStyle = el.color;
+  ctx.lineWidth = el.strokeWidth || 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (el.fillColor && el.fillColor !== "transparent") {
+    ctx.fillStyle = el.fillColor;
+  }
+  for (const d of icon.paths) {
+    const path = new Path2D(d);
+    if (el.fillColor && el.fillColor !== "transparent") ctx.fill(path);
+    ctx.stroke(path);
+  }
+  ctx.restore();
+}
+
+function renderDrawElement(ctx: CanvasRenderingContext2D, el: DrawElement) {
+  if (el.points.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = el.color;
+  ctx.lineWidth = el.strokeWidth;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (el.brush === "highlighter") ctx.globalAlpha *= 0.42;
+  ctx.beginPath();
+  ctx.moveTo(el.points[0].x, el.points[0].y);
+  for (let i = 1; i < el.points.length; i++) {
+    ctx.lineTo(el.points[i].x, el.points[i].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderTableElement(ctx: CanvasRenderingContext2D, el: TableElement) {
+  const rows = el.rows.length;
+  const cols = el.rows[0]?.length || 1;
+  const rowH = el.height / Math.max(1, rows);
+  const colW = el.width / Math.max(1, cols);
+
+  el.rows.forEach((row, rIdx) => {
+    row.forEach((cell, cIdx) => {
+      const x = cIdx * colW;
+      const y = rIdx * rowH;
+      ctx.fillStyle = rIdx === 0 ? el.headerBg : el.cellBg;
+      ctx.fillRect(x, y, colW, rowH);
+      ctx.strokeStyle = el.borderColor;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, y, colW, rowH);
+
+      ctx.fillStyle = rIdx === 0 ? el.headerColor : el.cellColor;
+      ctx.font = `${rIdx === 0 ? 700 : 400} ${el.fontSize}px "${el.fontFamily}", sans-serif`;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.fillText(cell, x + 12, y + rowH / 2, colW - 24);
+    });
+  });
+}
+
+function renderChartElement(ctx: CanvasRenderingContext2D, el: ChartElement) {
+  const palette = ["#4F46E5", "#06B6D4", "#F43F5E", "#10B981", "#F59E0B", "#8B5CF6"];
+  const titleOffset = el.title ? 40 : 12;
+  if (el.title) {
+    ctx.fillStyle = el.textColor;
+    ctx.font = `700 22px "Plus Jakarta Sans", sans-serif`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillText(el.title, 8, 6);
+  }
+
+  const data = el.data.length ? el.data : [{ label: "A", value: 10 }];
+  const maxVal = Math.max(1, ...data.map((d) => d.value));
+  const chartX = 16;
+  const chartY = titleOffset + 8;
+  const chartW = Math.max(40, el.width - 32);
