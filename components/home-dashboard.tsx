@@ -339,3 +339,345 @@ export function HomeDashboard() {
       setBusyMsg(null);
     }
   };
+
+  const moveToFolder = async (designId: string, folderId: string | null) => {
+    setDesigns((prev) => prev.map((x) => (x.id === designId ? { ...x, folderId } : x)));
+    await fetch(`/api/designs/${designId}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId }),
+    });
+  };
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    const res = await fetch("/api/folders", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newFolderName.trim() }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { folder: FolderRecord };
+      setFolders((prev) => [data.folder, ...prev]);
+      setNewFolderName("");
+      setAddingFolder(false);
+    }
+  };
+
+  const handleDeleteFolder = async (id: string) => {
+    setFolders((prev) => prev.filter((f) => f.id !== id));
+    if (activeFolderId === id) setActiveFolderId(null);
+    await fetch(`/api/folders?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+  };
+
+  const saveBrand = async (nextKit: BrandKit) => {
+    setBrandKit(nextKit);
+    await fetch("/api/brand-kit", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nextKit),
+    });
+    setBrandSaved(true);
+    setTimeout(() => setBrandSaved(false), 1800);
+  };
+
+  const handleBrandLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const opt = await readImageFileOptimized(file, 1024);
+    const item: BrandLogoItem = {
+      id: makeId("logo"),
+      name: file.name.replace(/\.[^.]+$/, ""),
+      variant: "primary",
+      dataUrl: opt.dataUrl,
+      createdAt: Date.now(),
+    };
+    await saveBrand({ ...brandKit, logos: [item, ...brandKit.logos], updatedAt: Date.now() });
+    e.target.value = "";
+  };
+
+  const queryLower = search.trim().toLowerCase();
+  const visibleDesigns = designs.filter((d) => {
+    if (section === "trash") return d.trashed;
+    if (d.trashed) return false;
+    if (section === "starred" && !d.starred) return false;
+    if (activeFolderId && d.folderId !== activeFolderId) return false;
+    if (queryLower && !d.title.toLowerCase().includes(queryLower)) return false;
+    return true;
+  });
+
+  const allTemplates = [...teamTemplates, ...BUILTIN_TEMPLATES].filter((t) => {
+    if (tplCategory !== "all" && tplCategory !== "team" && t.category !== tplCategory) return false;
+    if (tplCategory === "team" && !t.isCustom) return false;
+    if (
+      queryLower &&
+      !t.title.toLowerCase().includes(queryLower) &&
+      !t.tags.some((tag) => tag.toLowerCase().includes(queryLower))
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const sectionHeading = activeFolderId
+    ? folders.find((f) => f.id === activeFolderId)?.name || "Folder"
+    : section === "trash"
+      ? "Trash"
+      : section === "starred"
+        ? "Starred"
+        : section === "projects"
+          ? "All projects"
+          : "Recent";
+
+  return (
+    <div className="flex h-dvh overflow-hidden bg-[var(--bg)] text-[var(--fg)]">
+      {/* Hidden quick file inputs */}
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handlePhotoEditLaunch}
+        className="hidden"
+      />
+      <input
+        ref={pptxInputRef}
+        type="file"
+        accept=".pptx"
+        onChange={handlePptxLaunch}
+        className="hidden"
+      />
+      <input
+        ref={brandLogoInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleBrandLogoUpload}
+        className="hidden"
+      />
+
+      {/* Left Sidebar */}
+      <aside className="flex w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
+        <div className="flex h-14 items-center justify-between px-4">
+          <SlateWordmark size={24} />
+          <button
+            onClick={toggleTheme}
+            title="Toggle appearance"
+            className="rounded-md p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+          >
+            {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+
+        <div className="px-3 pb-3">
+          <button
+            onClick={() => setNewDesignModalOpen(true)}
+            className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] text-[13px] font-medium text-[var(--accent-fg)] transition hover:opacity-90 cursor-pointer"
+          >
+            <Plus className="h-3.5 w-3.5" /> New design
+          </button>
+        </div>
+
+        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 text-[13px]">
+          {(
+            [
+              { id: "home", label: "Home", icon: Home },
+              { id: "projects", label: "Projects", icon: LayoutGrid },
+              { id: "templates", label: "Templates", icon: LayoutTemplate },
+              { id: "brand", label: "Brand kit", icon: Palette },
+            ] as const
+          ).map((item) => {
+            const Icon = item.icon;
+            const active = section === item.id && !activeFolderId;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setSection(item.id);
+                  setActiveFolderId(null);
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition cursor-pointer ${
+                  active
+                    ? "bg-[var(--accent-soft)] font-medium text-[var(--fg)]"
+                    : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
+                }`}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {item.label}
+              </button>
+            );
+          })}
+
+          <button
+            onClick={() => setLogoModalOpen(true)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[var(--muted)] transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+          >
+            <Hexagon className="h-4 w-4 shrink-0" />
+            Logo studio
+          </button>
+
+          <div className="my-2.5 h-px bg-[var(--border)]" />
+
+          {(
+            [
+              { id: "starred", label: "Starred", icon: Star },
+              { id: "trash", label: "Trash", icon: Trash2 },
+            ] as const
+          ).map((item) => {
+            const Icon = item.icon;
+            const active = section === item.id && !activeFolderId;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setSection(item.id);
+                  setActiveFolderId(null);
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition cursor-pointer ${
+                  active
+                    ? "bg-[var(--accent-soft)] font-medium text-[var(--fg)]"
+                    : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
+                }`}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {item.label}
+              </button>
+            );
+          })}
+
+          {/* Folders */}
+          <div className="pt-4">
+            <div className="flex items-center justify-between px-2.5 pb-1 text-[11px] font-medium text-[var(--muted)]">
+              <span>Folders</span>
+              <button
+                onClick={() => setAddingFolder((a) => !a)}
+                className="rounded p-0.5 hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+                title="New folder"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {addingFolder && (
+              <div className="mb-1.5 flex gap-1 px-1.5">
+                <input
+                  autoFocus
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void handleCreateFolder()}
+                  placeholder="Folder name"
+                  className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs outline-none focus:border-[var(--border-strong)]"
+                />
+                <button
+                  onClick={() => void handleCreateFolder()}
+                  className="rounded-md bg-[var(--accent)] px-2 text-xs font-medium text-[var(--accent-fg)] cursor-pointer"
+                >
+                  Add
+                </button>
+              </div>
+            )}
+
+            <div className="space-y-0.5">
+              {folders.map((f) => (
+                <div
+                  key={f.id}
+                  onClick={() => {
+                    setSection("projects");
+                    setActiveFolderId(f.id);
+                  }}
+                  className={`group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[13px] cursor-pointer ${
+                    activeFolderId === f.id
+                      ? "bg-[var(--accent-soft)] font-medium text-[var(--fg)]"
+                      : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <Folder className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{f.name}</span>
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeleteFolder(f.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-rose-500 cursor-pointer"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </nav>
+
+        {/* Account Footer */}
+        <div className="border-t border-[var(--border)] px-3.5 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium text-[var(--fg)]">
+                {user?.display_name || "Local Workspace"}
+              </div>
+              <div className="truncate text-[11px] text-[var(--muted)]">
+                {user?.bi_id ? workspaceLabel(user.bi_id) : "Slate"}
+              </div>
+            </div>
+            {user?.mauth_enabled && (
+              <button
+                onClick={() => void logout()}
+                title="Log out"
+                className="rounded-md p-1.5 text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {/* Top Bar */}
+        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-6">
+          <div className="relative w-full max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--muted)]" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search designs and templates…"
+              className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/70 pl-8 pr-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted)] outline-none transition focus:border-[var(--border-strong)] focus:bg-[var(--surface)]"
+            />
+          </div>
+
+          {section !== "home" && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => pptxInputRef.current?.click()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-xs font-medium text-[var(--fg)] transition hover:bg-[var(--surface-2)] cursor-pointer"
+              >
+                <FileUp className="h-3.5 w-3.5 text-[var(--muted)]" /> Import PPTX
+              </button>
+              <button
+                onClick={() => photoInputRef.current?.click()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-xs font-medium text-[var(--fg)] transition hover:bg-[var(--surface-2)] cursor-pointer"
+              >
+                <ImageIcon className="h-3.5 w-3.5 text-[var(--muted)]" /> Edit Photo
+              </button>
+            </div>
+          )}
+        </header>
+
+        {/* Scrollable Workspace Canvas */}
+        <div className="flex-1 overflow-y-auto px-8 py-7">
+          <div className="mx-auto max-w-6xl space-y-9">
+            {errorMsg && (
+              <div className="flex items-center justify-between rounded-lg border border-rose-500/25 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-600 dark:text-rose-400">
+                <span>{errorMsg}</span>
+                <button onClick={() => setErrorMsg(null)} className="p-0.5 cursor-pointer">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
