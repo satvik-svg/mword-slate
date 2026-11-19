@@ -1022,3 +1022,344 @@ export function HomeDashboard() {
                             page={tpl.pages[0]}
                             width={tpl.width}
                             height={tpl.height}
+                            maxWidth={220}
+                            maxHeight={140}
+                            className="rounded-[4px] shadow-xs ring-1 ring-black/5 transition group-hover:scale-[1.02]"
+                          />
+                        )}
+                      </div>
+                      <div className="px-3.5 py-3">
+                        <div className="truncate text-[13px] font-medium text-[var(--fg)]">
+                          {tpl.title}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                          {tpl.pages.length > 1
+                            ? `${tpl.pages.length} slides`
+                            : `${tpl.width} × ${tpl.height}`}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* BRAND KIT TAB */}
+            {section === "brand" && (
+              <section className="mx-auto max-w-3xl space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-lg font-semibold tracking-tight text-[var(--fg)]">
+                      Brand kit
+                    </h1>
+                    <p className="mt-0.5 text-xs text-[var(--muted)]">
+                      Shared colors, logos, and typography available across your workspace.
+                    </p>
+                  </div>
+                  {brandSaved && (
+                    <span className="rounded-md bg-[var(--surface-2)] px-2.5 py-1 text-xs font-medium text-[var(--fg)]">
+                      Saved
+                    </span>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 space-y-6">
+                  <div>
+                    <label className="text-xs font-medium text-[var(--muted)]">Brand name</label>
+                    <input
+                      value={brandKit.name}
+                      onChange={(e) => setBrandKit({ ...brandKit, name: e.target.value })}
+                      onBlur={() => void saveBrand(brandKit)}
+                      className="mt-1.5 w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 px-3 py-2 text-sm text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
+                    />
+                  </div>
+
+                  {/* Logos */}
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-[var(--muted)]">Logos</span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => brandLogoInputRef.current?.click()}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
+                        >
+                          <Upload className="h-3.5 w-3.5" /> Upload
+                        </button>
+                        <button
+                          onClick={() => setLogoModalOpen(true)}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+                        >
+                          <Hexagon className="h-3.5 w-3.5" /> Create logo
+                        </button>
+                      </div>
+                    </div>
+                    {brandKit.logos.length === 0 ? (
+                      <div className="mt-3 rounded-lg border border-dashed border-[var(--border)] p-6 text-center text-xs text-[var(--muted)]">
+                        Upload your brand marks or generate vector logos in Logo Studio.
+                      </div>
+                    ) : (
+                      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        {brandKit.logos.map((logo) => (
+                          <div
+                            key={logo.id}
+                            className="group relative flex flex-col items-center rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 p-3"
+                          >
+                            <img
+                              src={logo.dataUrl}
+                              alt={logo.name}
+                              className="h-20 w-20 object-contain"
+                            />
+                            <div className="mt-2 truncate w-full text-center text-[11px] font-medium">
+                              {logo.name}
+                            </div>
+                            <button
+                              onClick={() =>
+                                void saveBrand({
+                                  ...brandKit,
+                                  logos: brandKit.logos.filter((l) => l.id !== logo.id),
+                                })
+                              }
+                              className="absolute right-1.5 top-1.5 rounded bg-black/70 p-1 text-white opacity-0 group-hover:opacity-100 cursor-pointer"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Colors */}
+                  <div>
+                    <span className="text-xs font-medium text-[var(--muted)]">Color palette</span>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-3">
+                      {brandKit.colors.map((c, idx) => (
+                        <div key={idx} className="flex flex-col items-center gap-1">
+                          <div className="relative">
+                            <input
+                              type="color"
+                              value={c}
+                              onChange={(e) => {
+                                const next = [...brandKit.colors];
+                                next[idx] = e.target.value;
+                                void saveBrand({ ...brandKit, colors: next });
+                              }}
+                              className="h-10 w-10 cursor-pointer rounded-lg border border-[var(--border)]"
+                            />
+                            {brandKit.colors.length > 2 && (
+                              <button
+                                onClick={() =>
+                                  void saveBrand({
+                                    ...brandKit,
+                                    colors: brandKit.colors.filter((_, i) => i !== idx),
+                                  })
+                                }
+                                className="absolute -right-1.5 -top-1.5 rounded-full bg-neutral-900 p-0.5 text-white cursor-pointer"
+                              >
+                                <X className="h-2.5 w-2.5" />
+                              </button>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-mono text-[var(--muted)]">{c}</span>
+                        </div>
+                      ))}
+                      {brandKit.colors.length < 10 && (
+                        <button
+                          onClick={() =>
+                            void saveBrand({ ...brandKit, colors: [...brandKit.colors, "#2563EB"] })
+                          }
+                          className="flex h-10 w-10 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)] hover:text-[var(--fg)] cursor-pointer"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Typography */}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    {(["heading", "subheading", "body"] as const).map((slot) => (
+                      <div key={slot}>
+                        <label className="text-xs font-medium capitalize text-[var(--muted)]">
+                          {slot} font
+                        </label>
+                        <select
+                          value={brandKit.fonts[slot]}
+                          onChange={(e) =>
+                            void saveBrand({
+                              ...brandKit,
+                              fonts: { ...brandKit.fonts, [slot]: e.target.value },
+                            })
+                          }
+                          className="mt-1.5 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 px-3 py-2 text-xs text-[var(--fg)] outline-none"
+                        >
+                          {GOOGLE_FONTS.map((f) => (
+                            <option key={f.name} value={f.name}>
+                              {f.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+          </div>
+        </div>
+      </main>
+
+      {/* New Design / Format Picker Modal */}
+      {newDesignModalOpen && (
+        <div
+          onClick={() => setNewDesignModalOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-4">
+              <h3 className="text-sm font-semibold text-[var(--fg)]">New design</h3>
+              <button
+                onClick={() => setNewDesignModalOpen(false)}
+                aria-label="Close"
+                title="Close (Esc)"
+                className="rounded-md p-1 text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="max-h-[75vh] overflow-y-auto p-6 space-y-6">
+              <div>
+                <div className="mb-2.5 text-xs font-medium text-[var(--muted)]">Presets</div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {FORMAT_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => {
+                        setNewDesignModalOpen(false);
+                        void createAndOpen({
+                          title: `Untitled ${preset.label}`,
+                          category: preset.category,
+                          width: preset.width,
+                          height: preset.height,
+                        });
+                      }}
+                      className="group flex items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]/60 cursor-pointer"
+                    >
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--surface-2)]">
+                        <div
+                          className="rounded-[2px] border-[1.5px] border-[var(--muted)] group-hover:border-[var(--fg)]"
+                          style={{
+                            width: preset.width >= preset.height ? 18 : 12,
+                            height:
+                              preset.height > preset.width
+                                ? 18
+                                : preset.width / preset.height > 2
+                                  ? 8
+                                  : 12,
+                          }}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-medium text-[var(--fg)]">
+                          {preset.label}
+                        </div>
+                        <div className="text-[10px] text-[var(--muted)]">{preset.sublabel}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-[var(--border)] pt-5">
+                <div className="mb-3 text-xs font-medium text-[var(--muted)]">Custom dimensions</div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_100px_100px_auto] sm:items-end">
+                  <div>
+                    <label className="text-[11px] text-[var(--muted)]">Title</label>
+                    <input
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      className="mt-1 h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 px-3 text-xs text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-[var(--muted)]">Width</label>
+                    <input
+                      type="number"
+                      min={100}
+                      max={6000}
+                      value={customW}
+                      onChange={(e) => setCustomW(Number(e.target.value))}
+                      className="mt-1 h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 px-2.5 text-xs text-[var(--fg)] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-[var(--muted)]">Height</label>
+                    <input
+                      type="number"
+                      min={100}
+                      max={6000}
+                      value={customH}
+                      onChange={(e) => setCustomH(Number(e.target.value))}
+                      className="mt-1 h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 px-2.5 text-xs text-[var(--fg)] outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      setNewDesignModalOpen(false);
+                      void createAndOpen({
+                        title: customTitle.trim() || "Untitled",
+                        category: "custom",
+                        width: customW,
+                        height: customH,
+                      });
+                    }}
+                    className="h-9 rounded-lg bg-[var(--accent)] px-4 text-xs font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Logo Studio Modal */}
+      <LogoMakerModal
+        open={logoModalOpen}
+        onClose={() => setLogoModalOpen(false)}
+        onOpenInEditor={async (logoTitle, page) => {
+          await createAndOpen({
+            title: logoTitle,
+            category: "logo",
+            width: 1000,
+            height: 1000,
+            pages: [page],
+          });
+        }}
+        onSaveToBrandKit={async (logos, colors, font) => {
+          await saveBrand({
+            ...brandKit,
+            logos: [...logos, ...brandKit.logos].slice(0, 12),
+            colors: Array.from(new Set([...colors, ...brandKit.colors])).slice(0, 8),
+            fonts: { ...brandKit.fonts, heading: font },
+            updatedAt: Date.now(),
+          });
+        }}
+      />
+
+      {/* Busy Overlay */}
+      {busyMsg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-5 py-3 text-xs font-medium text-[var(--fg)] shadow-xl">
+            {busyMsg}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
