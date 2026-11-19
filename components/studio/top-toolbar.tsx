@@ -272,3 +272,277 @@ export function TopToolbar({
               className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
             >
               <Share2 className="h-3.5 w-3.5" /> Share
+            </button>
+          )}
+          <button
+            onClick={onOpenExport}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-1.5 text-xs font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+          >
+            <Download className="h-3.5 w-3.5" /> Export
+          </button>
+        </div>
+      </div>
+
+      {/* Row 2: Contextual Property Bar */}
+      {!readOnly && (
+        <div className="flex min-h-11 flex-wrap items-center gap-2 border-t border-[var(--border)] bg-[var(--surface-2)]/60 px-3 py-1.5 text-xs">
+          {/* No selection: Page background controls */}
+          {selectedElements.length === 0 && (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-semibold text-[var(--muted)]">Page Background:</span>
+              <label className="inline-flex items-center gap-1.5 text-[var(--fg)]">
+                Color
+                <input
+                  type="color"
+                  value={page.background || "#FFFFFF"}
+                  onChange={(e) => onUpdatePage({ background: e.target.value })}
+                  className="h-6 w-6 cursor-pointer rounded border border-[var(--border)]"
+                />
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-[var(--fg)]">
+                Gradient To
+                <input
+                  type="color"
+                  value={page.backgroundGradientTo || page.background || "#FFFFFF"}
+                  onChange={(e) => onUpdatePage({ backgroundGradientTo: e.target.value })}
+                  className="h-6 w-6 cursor-pointer rounded border border-[var(--border)]"
+                />
+              </label>
+              {page.backgroundGradientTo && (
+                <button
+                  onClick={() => onUpdatePage({ backgroundGradientTo: undefined })}
+                  className="rounded-md bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                >
+                  Clear Gradient
+                </button>
+              )}
+              <div className="h-4 w-px bg-[var(--border)]" />
+              <label className="inline-flex items-center gap-1.5 text-[var(--muted)]">
+                Slide Transition
+                <select
+                  value={page.transition || "none"}
+                  onChange={(e) =>
+                    onUpdatePage({ transition: e.target.value as DesignPage["transition"] })
+                  }
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--fg)]"
+                >
+                  <option value="none">None</option>
+                  <option value="fade">Fade</option>
+                  <option value="slide">Slide</option>
+                  <option value="zoom">Zoom</option>
+                </select>
+              </label>
+            </div>
+          )}
+
+          {/* TEXT controls */}
+          {single?.type === "text" && (() => {
+            const t = single as TextElement;
+            return (
+              <>
+                <select
+                  value={t.fontFamily}
+                  onChange={(e) => onUpdateElement(t.id, { fontFamily: e.target.value }, true)}
+                  className="max-w-[150px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--fg)]"
+                >
+                  {!GOOGLE_FONTS.some((f) => f.name === t.fontFamily) && (
+                    <option value={t.fontFamily}>{t.fontFamily}</option>
+                  )}
+                  {GOOGLE_FONTS.map((f) => (
+                    <option key={f.name} value={f.name}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  min={8}
+                  max={360}
+                  value={t.fontSize}
+                  onChange={(e) => onUpdateElement(t.id, { fontSize: Math.max(8, Number(e.target.value)) }, true)}
+                  className="w-16 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--fg)]"
+                  title="Font size"
+                />
+
+                <input
+                  type="color"
+                  value={t.color}
+                  onChange={(e) => onUpdateElement(t.id, { color: e.target.value })}
+                  title="Text color"
+                  className="h-6 w-6 cursor-pointer rounded border border-[var(--border)]"
+                />
+
+                <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-0.5">
+                  <button
+                    onClick={() =>
+                      onUpdateElement(t.id, { fontWeight: t.fontWeight >= 700 ? 400 : 700 }, true)
+                    }
+                    className={`rounded p-1 cursor-pointer ${t.fontWeight >= 700 ? "bg-[var(--accent-soft)] text-[var(--accent)]" : ""}`}
+                    title="Bold"
+                  >
+                    <Bold className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => onUpdateElement(t.id, { italic: !t.italic }, true)}
+                    className={`rounded p-1 cursor-pointer ${t.italic ? "bg-[var(--accent-soft)] text-[var(--accent)]" : ""}`}
+                    title="Italic"
+                  >
+                    <Italic className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => onUpdateElement(t.id, { underline: !t.underline }, true)}
+                    className={`rounded p-1 cursor-pointer ${t.underline ? "bg-[var(--accent-soft)] text-[var(--accent)]" : ""}`}
+                    title="Underline"
+                  >
+                    <Underline className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => onUpdateElement(t.id, { strikethrough: !t.strikethrough }, true)}
+                    className={`rounded p-1 cursor-pointer ${t.strikethrough ? "bg-[var(--accent-soft)] text-[var(--accent)]" : ""}`}
+                    title="Strikethrough"
+                  >
+                    <Strikethrough className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-0.5">
+                  {(["left", "center", "right"] as const).map((a) => {
+                    const Ico = a === "left" ? AlignLeft : a === "center" ? AlignCenter : AlignRight;
+                    return (
+                      <button
+                        key={a}
+                        onClick={() => onUpdateElement(t.id, { align: a }, true)}
+                        className={`rounded p-1 cursor-pointer ${t.align === a ? "bg-[var(--accent-soft)] text-[var(--accent)]" : ""}`}
+                      >
+                        <Ico className="h-3.5 w-3.5" />
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <label className="inline-flex items-center gap-1 text-[11px] text-[var(--muted)]" title="Curve text">
+                  Curve
+                  <input
+                    type="range"
+                    min={-80}
+                    max={80}
+                    value={t.curve ?? 0}
+                    onChange={(e) => onUpdateElement(t.id, { curve: Number(e.target.value) })}
+                    className="w-16 accent-[var(--accent)]"
+                  />
+                </label>
+
+                <button
+                  onClick={() =>
+                    onUpdateElement(
+                      t.id,
+                      t.shadowBlur
+                        ? { shadowBlur: 0, shadowColor: undefined }
+                        : { shadowBlur: 14, shadowColor: "rgba(0,0,0,0.35)", shadowOffsetY: 5 },
+                      true,
+                    )
+                  }
+                  className={`rounded-lg border px-2 py-1 text-[11px] font-medium cursor-pointer ${
+                    t.shadowBlur ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] bg-[var(--surface)]"
+                  }`}
+                >
+                  Shadow
+                </button>
+
+                <button
+                  onClick={() =>
+                    onUpdateElement(
+                      t.id,
+                      t.backgroundColor
+                        ? { backgroundColor: undefined }
+                        : { backgroundColor: "#FEF08A", backgroundPadding: 10, backgroundRadius: 10 },
+                      true,
+                    )
+                  }
+                  className={`rounded-lg border px-2 py-1 text-[11px] font-medium cursor-pointer ${
+                    t.backgroundColor ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] bg-[var(--surface)]"
+                  }`}
+                >
+                  Highlight
+                </button>
+              </>
+            );
+          })()}
+
+          {/* SHAPE controls */}
+          {single?.type === "shape" && (() => {
+            const s = single as ShapeElement;
+            return (
+              <>
+                <label className="inline-flex items-center gap-1">
+                  Fill
+                  <input
+                    type="color"
+                    value={s.fill === "transparent" ? "#4F46E5" : s.fill}
+                    onChange={(e) => onUpdateElement(s.id, { fill: e.target.value })}
+                    className="h-6 w-6 cursor-pointer rounded"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1">
+                  Gradient
+                  <input
+                    type="color"
+                    value={s.gradientTo || s.fill || "#06B6D4"}
+                    onChange={(e) => onUpdateElement(s.id, { gradientTo: e.target.value })}
+                    className="h-6 w-6 cursor-pointer rounded"
+                  />
+                </label>
+                {s.gradientTo && (
+                  <button
+                    onClick={() => onUpdateElement(s.id, { gradientTo: undefined }, true)}
+                    className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[11px] cursor-pointer"
+                  >
+                    Solid
+                  </button>
+                )}
+                <label className="inline-flex items-center gap-1">
+                  Border
+                  <input
+                    type="color"
+                    value={s.stroke === "transparent" ? "#0F172A" : s.stroke}
+                    onChange={(e) =>
+                      onUpdateElement(s.id, { stroke: e.target.value, strokeWidth: Math.max(2, s.strokeWidth || 2) })
+                    }
+                    className="h-6 w-6 cursor-pointer rounded"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    max={40}
+                    value={s.strokeWidth}
+                    onChange={(e) => onUpdateElement(s.id, { strokeWidth: Number(e.target.value) }, true)}
+                    className="w-12 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5"
+                  />
+                </label>
+                {s.shape === "rect" && (
+                  <label className="inline-flex items-center gap-1">
+                    Radius
+                    <input
+                      type="range"
+                      min={0}
+                      max={120}
+                      value={s.borderRadius ?? 0}
+                      onChange={(e) => onUpdateElement(s.id, { borderRadius: Number(e.target.value) })}
+                      className="w-16 accent-[var(--accent)]"
+                    />
+                  </label>
+                )}
+              </>
+            );
+          })()}
+
+          {/* IMAGE controls */}
+          {single?.type === "image" && (() => {
+            const im = single as ImageElement;
+            return (
+              <>
+                <button
+                  onClick={onOpenPhotoTab}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent-fg)] cursor-pointer"
+                >
