@@ -934,3 +934,315 @@ export async function importPptxBuffer(
           let color = "#111114";
           let align: "left" | "center" | "right" = "left";
           let letterSpacing = 0;
+          let lineHeight = 1.2;
+
+          let autoNumCounter = 0;
+
+          for (const p of paragraphs) {
+            const pPr = directChild(p, "pPr");
+            if (pPr) {
+              const algn = getAttr(pPr, "algn");
+              if (!stylePicked) {
+                if (algn === "ctr") align = "center";
+                else if (algn === "r") align = "right";
+                else if (algn === "l") align = "left";
+              }
+              const spcPct = firstDescendant(directChild(pPr, "lnSpc"), "spcPct");
+              if (spcPct && !stylePicked) {
+                const pct = Number(getAttr(spcPct, "val"));
+                if (pct > 0) {
+                  // PowerPoint single-line spacing is ~1.2em; spcPct scales relative to single-line height
+                  lineHeight = Math.max(0.92, Math.min(2.0, +((pct / 100000) * 1.2).toFixed(2)));
+                }
+              }
+            }
+
+            // Bullet prefix if present
+            let prefix = "";
+            if (pPr && !directChild(pPr, "buNone")) {
+              const buChar = directChild(pPr, "buChar");
+              const buAutoNum = directChild(pPr, "buAutoNum");
+              if (buChar) {
+                prefix = `${getAttr(buChar, "char") || "•"} `;
+              } else if (buAutoNum) {
+                autoNumCounter += 1;
+                prefix = `${autoNumCounter}. `;
+              }
+            }
+
+            let line = "";
+            for (const pChild of p.children) {
+              if (pChild.localName === "br") {
+                line += "\n";
+                continue;
+              }
+              if (pChild.localName !== "r" && pChild.localName !== "fld") continue;
+              const tNode = directChild(pChild, "t");
+              const runText = tNode?.text ?? "";
+              const rPr = directChild(pChild, "rPr");
+
+              if (rPr && (!stylePicked || (runText.trim().length > 0 && !stylePicked))) {
+                const sz = Number(getAttr(rPr, "sz"));
+                if (sz > 0) {
+                  fontSizePx = Math.max(10, Math.round((sz / 100) * ptToPx * autofitScale));
+                }
+                const spc = Number(getAttr(rPr, "spc"));
+                if (!Number.isNaN(spc) && getAttr(rPr, "spc") !== undefined) {
+                  letterSpacing = +(((spc / 100) * ptToPx)).toFixed(1);
+                }
+                const latin = directChild(rPr, "latin");
+                const { family, inferredWeight } = normalizeFontFamilyAndWeight(
+                  getAttr(latin, "typeface"),
+                );
+                if (latin && getAttr(latin, "typeface")) {
+                  fontFamily = family;
+                }
+                if (getAttr(rPr, "b") === "1") {
+                  fontWeight = 700;
+                } else if (inferredWeight !== null) {
+                  fontWeight = inferredWeight;
+                }
+                if (getAttr(rPr, "i") === "1") italic = true;
+                const u = getAttr(rPr, "u");
+                if (u && u !== "none") underline = true;
+                const strike = getAttr(rPr, "strike");
+                if (strike && strike !== "noStrike") strikethrough = true;
+                if (getAttr(rPr, "cap") === "all") textTransform = "uppercase";
+
+                const rCol = extractColorInfo(directChild(rPr, "solidFill"), themeColors);
+                if (rCol) color = rCol.color;
+
+                if (runText.trim().length > 0) stylePicked = true;
+              }
+
+              line += runText;
+            }
+
+            if (line.length > 0) {
+              lines.push(prefix + line);
+            } else if (lines.length > 0) {
+              lines.push("");
+            }
+          }
+
+          // Trim trailing blank lines only
+          while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+          const text = lines.join("\n").trim();
+
+          if (text) {
+            const innerX = box.x + lIns;
+            const innerY = box.y + tIns;
+            // Give wrap="none" text boxes a tiny 4% width cushion so browser font metric differences
+            // never cause single-line titles/badges to wrap unexpectedly.
+            const rawInnerW = Math.max(24, box.w - lIns - rIns);
+            const innerW = wrapMode === "none" ? Math.round(rawInnerW * 1.04) : rawInnerW;
+            const innerH = Math.max(Math.round(fontSizePx * lineHeight), box.h - tIns - bIns);
+
+            const textEl: TextElement = {
+              id: makeId("el"),
+              type: "text",
+              name: text.slice(0, 28),
+              text,
+              x: innerX,
+              y: innerY,
+              width: innerW,
+              height: innerH,
+              rotation: box.rotation,
+              opacity: 1,
+              fontFamily,
+              fontSize: Math.min(200, Math.max(10, fontSizePx)),
+              fontWeight,
+              italic: italic || undefined,
+              underline: underline || undefined,
+              strikethrough: strikethrough || undefined,
+              textTransform: textTransform !== "none" ? textTransform : undefined,
+              color,
+              align,
+              lineHeight,
+              letterSpacing,
+            };
+            out.push(textEl);
+          }
+        }
+      }
+    }
+  };
+
+  // Locate slides in presentation order (fall back to numeric slideN.xml order)
+  const slideNames = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
+    .sort((a, b) => {
+      const na = Number(a.match(/slide(\d+)\.xml/i)?.[1] ?? 0);
+      const nb = Number(b.match(/slide(\d+)\.xml/i)?.[1] ?? 0);
+      return na - nb;
+    });
+
+  const rootCtx: TransformContext = {
+    mapX: (emuX) => emuX * scaleX,
+    mapY: (emuY) => emuY * scaleY,
+    scaleX,
+    scaleY,
+  };
+
+  const pages: DesignPage[] = [];
+
+  for (let idx = 0; idx < slideNames.length; idx++) {
+    const slidePath = slideNames[idx];
+    const xmlStr = await zip.file(slidePath)?.async("string");
+    if (!xmlStr) continue;
+    const slideDoc = parseXml(xmlStr);
+    const slideRels = await loadRels(zip, slidePath);
+
+    // Find linked slideLayout and slideMaster
+    let layoutDoc: XmlNode | null = null;
+    let layoutPath: string | null = null;
+    let layoutRels = new Map<string, RelEntry>();
+    let masterDoc: XmlNode | null = null;
+    let masterPath: string | null = null;
+    let masterRels = new Map<string, RelEntry>();
+    let notesText = "";
+
+    for (const rel of slideRels.values()) {
+      if (rel.type.endsWith("/slideLayout")) {
+        layoutPath = resolveRelPath(slidePath, rel.target);
+        const lXml = await zip.file(layoutPath)?.async("string");
+        if (lXml) {
+          layoutDoc = parseXml(lXml);
+          layoutRels = await loadRels(zip, layoutPath);
+          for (const lRel of layoutRels.values()) {
+            if (lRel.type.endsWith("/slideMaster")) {
+              masterPath = resolveRelPath(layoutPath, lRel.target);
+              const mXml = await zip.file(masterPath)?.async("string");
+              if (mXml) {
+                masterDoc = parseXml(mXml);
+                masterRels = await loadRels(zip, masterPath);
+              }
+            }
+          }
+        }
+      } else if (rel.type.endsWith("/notesSlide")) {
+        const nPath = resolveRelPath(slidePath, rel.target);
+        const nXml = await zip.file(nPath)?.async("string");
+        if (nXml) {
+          const nDoc = parseXml(nXml);
+          const noteLines: string[] = [];
+          for (const sp of allDescendants(nDoc, "sp")) {
+            const ph = firstDescendant(sp, "ph");
+            if (getAttr(ph, "type") === "body") {
+              for (const p of allDescendants(sp, "p")) {
+                const text = allDescendants(p, "t")
+                  .map((t) => t.text)
+                  .join("")
+                  .trim();
+                if (text) noteLines.push(text);
+              }
+            }
+          }
+          notesText = noteLines.join("\n");
+        }
+      }
+    }
+
+    // Resolve background: slide -> layout -> master -> #FFFFFF
+    const masterBg = masterDoc && masterPath ? await extractBgFromDoc(masterDoc, masterPath, masterRels) : {};
+    const layoutBg = layoutDoc && layoutPath ? await extractBgFromDoc(layoutDoc, layoutPath, layoutRels) : {};
+    const slideBg = await extractBgFromDoc(slideDoc, slidePath, slideRels);
+
+    let background = slideBg.background ?? layoutBg.background ?? masterBg.background ?? "#FFFFFF";
+    const backgroundGradientTo =
+      slideBg.backgroundGradientTo ?? layoutBg.backgroundGradientTo ?? masterBg.backgroundGradientTo;
+    const backgroundGradientAngle =
+      slideBg.backgroundGradientAngle ??
+      layoutBg.backgroundGradientAngle ??
+      masterBg.backgroundGradientAngle;
+    let backgroundImage =
+      slideBg.backgroundImage ?? layoutBg.backgroundImage ?? masterBg.backgroundImage;
+
+    const elements: CanvasElement[] = [];
+
+    // 1. Master non-placeholder background shapes/images
+    if (masterDoc && masterPath) {
+      const mTree = firstDescendant(masterDoc, "spTree");
+      if (mTree) {
+        await parseTreeChildren(
+          mTree.children,
+          rootCtx,
+          masterPath,
+          masterRels,
+          {
+            isLayoutOrMaster: true,
+            onFullBleedBgImage: (url) => {
+              if (!backgroundImage) backgroundImage = url;
+            },
+          },
+          elements,
+        );
+      }
+    }
+
+    // 2. Layout non-placeholder shapes/images (e.g. Slide 1 hero photo & footer logo)
+    if (layoutDoc && layoutPath) {
+      const lTree = firstDescendant(layoutDoc, "spTree");
+      if (lTree) {
+        await parseTreeChildren(
+          lTree.children,
+          rootCtx,
+          layoutPath,
+          layoutRels,
+          {
+            isLayoutOrMaster: true,
+            onFullBleedBgImage: (url) => {
+              backgroundImage = url;
+            },
+          },
+          elements,
+        );
+      }
+    }
+
+    // 3. Slide elements
+    const spTree = firstDescendant(slideDoc, "spTree");
+    if (spTree) {
+      await parseTreeChildren(spTree.children, rootCtx, slidePath, slideRels, {}, elements);
+    }
+
+    if (!background) background = "#FFFFFF";
+
+    pages.push({
+      id: makeId("pg"),
+      name: `Slide ${idx + 1}`,
+      background,
+      backgroundGradientTo,
+      backgroundGradientAngle,
+      backgroundImage,
+      notes: notesText || undefined,
+      elements,
+    });
+  }
+
+  if (pages.length === 0) {
+    pages.push({
+      id: makeId("pg"),
+      name: "Slide 1",
+      background: "#FFFFFF",
+      elements: [],
+    });
+  }
+
+  return {
+    title: fileName.replace(/\.pptx$/i, "") || "Imported Presentation",
+    width,
+    height,
+    pages,
+  };
+}
+
+export async function importPptxFile(file: File): Promise<{
+  title: string;
+  width: number;
+  height: number;
+  pages: DesignPage[];
+}> {
+  const buf = await file.arrayBuffer();
+  return importPptxBuffer(buf, file.name);
+}
