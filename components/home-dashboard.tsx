@@ -681,3 +681,344 @@ export function HomeDashboard() {
                 </button>
               </div>
             )}
+
+            {/* HOME: Compact Quick Start Row */}
+            {section === "home" && (
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-[13px] font-medium text-[var(--muted)]">Start new</h2>
+                  <div className="flex items-center gap-4 text-xs">
+                    <button
+                      onClick={() => setNewDesignModalOpen(true)}
+                      className="text-[var(--muted)] transition hover:text-[var(--fg)] cursor-pointer"
+                    >
+                      All formats
+                    </button>
+                    <button
+                      onClick={() => setSection("templates")}
+                      className="inline-flex items-center gap-1 font-medium text-[var(--fg)] transition hover:opacity-75 cursor-pointer"
+                    >
+                      Templates <ArrowRight className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <button
+                    onClick={() =>
+                      void createAndOpen({
+                        title: "Untitled Presentation",
+                        category: "presentation",
+                        width: 1920,
+                        height: 1080,
+                      })
+                    }
+                    className="group flex items-center gap-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]/40 cursor-pointer"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-[var(--fg)]">
+                      <Presentation className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium text-[var(--fg)]">Presentation</div>
+                      <div className="text-[11px] text-[var(--muted)]">16:9 widescreen deck</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      void createAndOpen({
+                        title: "Untitled Graphic",
+                        category: "social",
+                        width: 1080,
+                        height: 1080,
+                      })
+                    }
+                    className="group flex items-center gap-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]/40 cursor-pointer"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-[var(--fg)]">
+                      <Square className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium text-[var(--fg)]">Social graphic</div>
+                      <div className="text-[11px] text-[var(--muted)]">1080 × 1080 square</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => pptxInputRef.current?.click()}
+                    className="group flex items-center gap-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]/40 cursor-pointer"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-[var(--fg)]">
+                      <FileUp className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium text-[var(--fg)]">Import PowerPoint</div>
+                      <div className="text-[11px] text-[var(--muted)]">Edit any .pptx deck</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    className="group flex items-center gap-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]/40 cursor-pointer"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-[var(--fg)]">
+                      <ImageIcon className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium text-[var(--fg)]">Photo editor</div>
+                      <div className="text-[11px] text-[var(--muted)]">Filters, crop & cutout</div>
+                    </div>
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {/* DESIGNS GRID (Home, Projects, Starred, Trash) */}
+            {(section === "home" ||
+              section === "projects" ||
+              section === "starred" ||
+              section === "trash") && (
+              <section>
+                <div className="mb-3.5 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[13px] font-medium text-[var(--muted)]">
+                      {sectionHeading}
+                    </h2>
+                    <span className="text-xs text-[var(--muted)]/70">{visibleDesigns.length}</span>
+                  </div>
+                </div>
+
+                {loading ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div
+                        key={i}
+                        className="aspect-[16/12] animate-pulse rounded-xl bg-[var(--surface-2)]"
+                      />
+                    ))}
+                  </div>
+                ) : visibleDesigns.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-16 text-center">
+                    <p className="text-sm font-medium text-[var(--fg)]">
+                      {section === "trash"
+                        ? "Trash is empty"
+                        : section === "starred"
+                          ? "No starred designs"
+                          : "No designs yet"}
+                    </p>
+                    {section !== "trash" && section !== "starred" && (
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        Start a blank canvas, import a PowerPoint, or pick a template.
+                      </p>
+                    )}
+                    {section !== "trash" && section !== "starred" && (
+                      <div className="mt-4 flex items-center gap-2">
+                        <button
+                          onClick={() => setNewDesignModalOpen(true)}
+                          className="rounded-lg bg-[var(--accent)] px-3.5 py-1.5 text-xs font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+                        >
+                          New design
+                        </button>
+                        <button
+                          onClick={() => setSection("templates")}
+                          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1.5 text-xs font-medium text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
+                        >
+                          Browse templates
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {visibleDesigns.map((d) => (
+                      <div
+                        key={d.id}
+                        className="group relative flex flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] transition hover:border-[var(--border-strong)]"
+                      >
+                        <div
+                          onClick={() => !d.trashed && router.push(`/design/${d.id}`)}
+                          className="relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-t-[11px] bg-[var(--stage)] p-3 cursor-pointer"
+                        >
+                          {d.thumbnail ? (
+                            <img
+                              src={d.thumbnail}
+                              alt={d.title}
+                              className="max-h-full max-w-full rounded-[4px] object-contain shadow-xs ring-1 ring-black/5"
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center gap-1 text-[11px] text-[var(--muted)]">
+                              <LayoutTemplate className="h-5 w-5 opacity-35" />
+                              <span>
+                                {d.width} × {d.height}
+                              </span>
+                            </div>
+                          )}
+
+                          {!d.trashed && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void toggleStar(d);
+                              }}
+                              title={d.starred ? "Remove star" : "Star design"}
+                              className={`absolute right-2 top-2 rounded-md p-1.5 transition cursor-pointer ${
+                                d.starred
+                                  ? "bg-[var(--surface)]/95 text-amber-500 shadow-xs"
+                                  : "bg-[var(--surface)]/85 text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--fg)]"
+                              }`}
+                            >
+                              <Star className={`h-3.5 w-3.5 ${d.starred ? "fill-current" : ""}`} />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 px-3.5 py-3">
+                          <div
+                            onClick={() => !d.trashed && router.push(`/design/${d.id}`)}
+                            className="min-w-0 flex-1 cursor-pointer"
+                          >
+                            <div className="truncate text-[13px] font-medium text-[var(--fg)]">
+                              {d.title}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                              {d.pageCount > 1 ? `${d.pageCount} pages` : `${d.width}×${d.height}`} ·{" "}
+                              {formatRelativeDate(d.updatedAt)}
+                            </div>
+                          </div>
+
+                          {d.trashed ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => void moveToTrash(d, false)}
+                                title="Restore"
+                                className="rounded-md p-1.5 text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => void deleteForever(d.id)}
+                                title="Delete permanently"
+                                className="rounded-md p-1.5 text-[var(--muted)] hover:bg-rose-500/10 hover:text-rose-500 cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuId(openMenuId === d.id ? null : d.id);
+                                }}
+                                className="rounded-md p-1 text-[var(--muted)] opacity-0 transition group-hover:opacity-100 focus:opacity-100 hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+                                title="Options"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </button>
+
+                              {openMenuId === d.id && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 bottom-8 z-30 w-44 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-lg"
+                                >
+                                  <button
+                                    onClick={() => void duplicateDesign(d)}
+                                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
+                                  >
+                                    <Copy className="h-3.5 w-3.5 text-[var(--muted)]" /> Duplicate
+                                  </button>
+
+                                  {folders.length > 0 && (
+                                    <div className="px-2 py-1.5">
+                                      <label className="block text-[10px] font-medium text-[var(--muted)] mb-1">
+                                        Folder
+                                      </label>
+                                      <select
+                                        value={d.folderId || ""}
+                                        onChange={(e) => {
+                                          void moveToFolder(d.id, e.target.value || null);
+                                          setOpenMenuId(null);
+                                        }}
+                                        className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-1 text-[11px] text-[var(--fg)] outline-none"
+                                      >
+                                        <option value="">None</option>
+                                        {folders.map((f) => (
+                                          <option key={f.id} value={f.id}>
+                                            {f.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+
+                                  <div className="my-1 h-px bg-[var(--border)]" />
+                                  <button
+                                    onClick={() => void moveToTrash(d, true)}
+                                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" /> Move to trash
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* TEMPLATES TAB */}
+            {section === "templates" && (
+              <section className="space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h1 className="text-lg font-semibold tracking-tight text-[var(--fg)]">
+                      Templates
+                    </h1>
+                    <p className="mt-0.5 text-xs text-[var(--muted)]">
+                      Start from an editable layout for presentations, social, marketing, or docs.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1">
+                    {["all", "team", "presentation", "social", "marketing", "document"].map(
+                      (cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => setTplCategory(cat)}
+                          className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize transition cursor-pointer ${
+                            tplCategory === cat
+                              ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                              : "text-[var(--muted)] hover:text-[var(--fg)]"
+                          }`}
+                        >
+                          {cat === "team" ? "Team" : cat}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {allTemplates.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      onClick={() =>
+                        void createAndOpen({
+                          title: tpl.title,
+                          category: tpl.category,
+                          width: tpl.width,
+                          height: tpl.height,
+                          pages: instantiateTemplate(tpl),
+                        })
+                      }
+                      className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-left transition hover:border-[var(--border-strong)] cursor-pointer"
+                    >
+                      <div className="flex aspect-[16/10] w-full items-center justify-center bg-[var(--stage)] p-3">
+                        {tpl.pages[0] && (
+                          <PagePreview
+                            page={tpl.pages[0]}
+                            width={tpl.width}
+                            height={tpl.height}
