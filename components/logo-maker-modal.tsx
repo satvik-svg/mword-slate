@@ -312,3 +312,159 @@ export function LogoMakerModal({
                 {(["default", "dark", "icon", "card"] as const).map((mode) => (
                   <button
                     key={mode}
+                    onClick={() => setPreviewMode(mode)}
+                    className={`rounded-lg px-2.5 py-1 font-medium capitalize transition cursor-pointer ${
+                      previewMode === mode
+                        ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                        : "bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--fg)]"
+                    }`}
+                  >
+                    {mode === "card" ? "Business Card" : mode}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {onSaveToBrandKit && (
+                  <button
+                    onClick={() => handleSaveBrand(activeConcept)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
+                  >
+                    {savedId === activeConcept.id ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 text-emerald-500" />
+                        Saved to Brand Kit
+                      </>
+                    ) : (
+                      <>
+                        <Palette className="h-3.5 w-3.5" />
+                        Save to Brand Kit
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => handleDownloadPack(activeConcept)}
+                  disabled={downloadingId === activeConcept.id}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {downloadingId === activeConcept.id ? "Packing…" : "Download Pack (.zip)"}
+                </button>
+                {onInsertOnCanvas ? (
+                  <>
+                    <button
+                      onClick={() => void handleEdit(activeConcept)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      New Logo File
+                    </button>
+                    <button
+                      onClick={() => handleInsert(activeConcept)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-1.5 text-xs font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Insert on Slide
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => void handleEdit(activeConcept)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-1.5 text-xs font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Customize in Studio
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {concepts.map((concept) => {
+                  const isSelected = activeConcept.id === concept.id;
+                  const svg = renderLogoConceptSvg(concept, {
+                    darkMode: previewMode === "dark",
+                    iconOnly: previewMode === "icon",
+                  });
+                  const url = svgToDataUrl(svg);
+                  const frameBg =
+                    previewMode === "card" || previewMode === "icon"
+                      ? undefined
+                      : previewMode === "dark"
+                        ? "#0F172A"
+                        : concept.bgColor;
+
+                  return (
+                    <div
+                      key={concept.id}
+                      onClick={() => setSelectedId(concept.id)}
+                      className={`group flex flex-col overflow-hidden rounded-2xl border transition cursor-pointer ${
+                        isSelected
+                          ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/25"
+                          : "border-[var(--border)] hover:border-[var(--accent)]/60"
+                      }`}
+                    >
+                      <div
+                        className={`relative flex h-44 w-full shrink-0 items-center justify-center overflow-hidden ${
+                          previewMode === "card"
+                            ? "bg-[var(--surface-2)] p-4"
+                            : previewMode === "icon"
+                              ? "bg-[var(--surface-2)] p-5"
+                              : "p-3"
+                        }`}
+                        style={frameBg ? { backgroundColor: frameBg } : undefined}
+                      >
+                        {previewMode === "card" ? (
+                          <div className="flex h-28 w-48 items-center justify-center rounded-xl border border-black/10 bg-white p-3 shadow-lg">
+                            <img
+                              src={url}
+                              alt={concept.label}
+                              className="h-full w-full object-contain"
+                            />
+                          </div>
+                        ) : (
+                          <img
+                            src={url}
+                            alt={concept.label}
+                            className="h-full w-full object-contain"
+                          />
+                        )}
+                        <div className="absolute right-2.5 top-2.5 flex gap-1 opacity-0 transition group-hover:opacity-100">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onInsertOnCanvas) handleInsert(concept);
+                              else void handleEdit(concept);
+                            }}
+                            className="rounded-lg bg-black/75 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-black cursor-pointer"
+                          >
+                            {onInsertOnCanvas ? "Insert" : "Edit"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-xs">
+                        <span className="font-semibold text-[var(--fg)]">{concept.label}</span>
+                        <div className="flex items-center gap-1">
+                          <span
+                            className="h-3 w-3 rounded-full border border-black/10"
+                            style={{ background: concept.primaryColor }}
+                          />
+                          <span
+                            className="h-3 w-3 rounded-full border border-black/10"
+                            style={{ background: concept.accentColor }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
