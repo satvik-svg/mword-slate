@@ -1066,3 +1066,359 @@ export function StudioEditor({
                       idx === activePageIdx
                         ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
                         : "border-[var(--border)] hover:border-[var(--accent)]"
+                    }`}
+                  >
+                    <div className="flex h-44 items-center justify-center rounded-xl bg-[var(--stage)] p-2">
+                      <PagePreview page={p} width={width} height={height} maxWidth={260} maxHeight={160} />
+                    </div>
+                    <div className="mt-2.5 flex items-center justify-between text-xs">
+                      <span className="font-semibold">
+                        {idx + 1}. {p.name}
+                      </span>
+                      {!readOnly && (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              duplicatePage(idx);
+                            }}
+                            className="rounded p-1 text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                          {pages.length > 1 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deletePage(idx);
+                              }}
+                              className="rounded p-1 text-[var(--muted)] hover:text-rose-500 cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <CanvasStage
+              page={activePage}
+              width={width}
+              height={height}
+              zoom={zoom}
+              selectedIds={selectedIds}
+              onSelect={setSelectedIds}
+              onUpdateElements={updateActivePageElements}
+              onCommitHistory={commitCurrentToHistory}
+              onAddElement={handleAddElement}
+              readOnly={readOnly}
+              drawTool={drawTool}
+              commentMode={commentMode && canComment}
+              comments={comments}
+              onPinComment={handlePinComment}
+              onSelectComment={() => setCommentsOpen(true)}
+              onQuickAddHeading={() => {
+                const scale = Math.max(0.6, Math.min(1.4, width / 1080));
+                const fontSize = Math.round(72 * scale);
+                const w = Math.round(Math.min(width * 0.72, 760 * scale));
+                const h = Math.round(fontSize * 1.45);
+                handleAddElement({
+                  id: makeId("el"),
+                  type: "text",
+                  name: "Heading",
+                  text: "Your headline here",
+                  x: Math.round((width - w) / 2),
+                  y: Math.round((height - h) / 2),
+                  width: w,
+                  height: h,
+                  rotation: 0,
+                  opacity: 1,
+                  fontFamily: brandKit.fonts.heading || "Plus Jakarta Sans",
+                  fontSize,
+                  fontWeight: 700,
+                  color: "#111114",
+                  align: "center",
+                  lineHeight: 1.15,
+                  letterSpacing: -1,
+                });
+              }}
+              onQuickOpenUploads={() => setRailTab("uploads")}
+              onQuickOpenTemplates={() => setRailTab("templates")}
+            />
+          )}
+
+          {/* Speaker Notes Bar */}
+          {notesOpen && !readOnly && (
+            <div className="border-t border-[var(--border)] bg-[var(--surface)] px-4 py-2.5">
+              <div className="mb-1 text-[11px] font-semibold text-[var(--muted)]">
+                Speaker Notes — {activePage.name}
+              </div>
+              <textarea
+                value={activePage.notes || ""}
+                onChange={(e) => updateActivePage({ notes: e.target.value })}
+                rows={2}
+                placeholder="Write talking points for Present Mode or PPTX export…"
+                className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-xs text-[var(--fg)] outline-none"
+              />
+            </div>
+          )}
+
+          {/* Bottom Page Filmstrip + Zoom Controls */}
+          <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-t border-[var(--border)] bg-[var(--surface)] px-3">
+            <div className="flex items-center gap-2 overflow-x-auto py-1">
+              {pages.map((p, idx) => (
+                <div
+                  key={p.id}
+                  onClick={() => {
+                    setActivePageIdx(idx);
+                    setSelectedIds([]);
+                  }}
+                  className={`group flex shrink-0 items-center gap-2 rounded-lg border px-2 py-1 text-xs transition cursor-pointer ${
+                    idx === activePageIdx
+                      ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-semibold"
+                      : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)]"
+                  }`}
+                >
+                  <span>{idx + 1}</span>
+                  <span className="max-w-[80px] truncate">{p.name}</span>
+                  {!readOnly && pages.length > 1 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deletePage(idx);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-rose-500 cursor-pointer"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {!readOnly && (
+                <>
+                  <button
+                    onClick={addPage}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-[var(--border)] px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add Page
+                  </button>
+                  <button
+                    onClick={() => duplicatePage(activePageIdx)}
+                    title="Duplicate current page"
+                    className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2 text-xs">
+              {!readOnly && (
+                <button
+                  onClick={() => setNotesOpen((n) => !n)}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium cursor-pointer ${
+                    notesOpen
+                      ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                      : "text-[var(--muted)] hover:bg-[var(--surface-2)]"
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5" /> Notes
+                </button>
+              )}
+
+              <button
+                onClick={() => setGridView((g) => !g)}
+                className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium cursor-pointer ${
+                  gridView
+                    ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                    : "text-[var(--muted)] hover:bg-[var(--surface-2)]"
+                }`}
+              >
+                <Grid className="h-3.5 w-3.5" /> Grid
+              </button>
+
+              <div className="h-4 w-px bg-[var(--border)]" />
+
+              <button
+                onClick={() => {
+                  setAutoFit(false);
+                  setZoom((z) => Math.max(0.15, +(z - 0.1).toFixed(2)));
+                }}
+                title="Zoom out"
+                aria-label="Zoom out"
+                className="rounded p-1 text-[var(--muted)] hover:bg-[var(--surface-2)] cursor-pointer"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => {
+                  setAutoFit(true);
+                  const fit = computeFitZoom();
+                  if (fit !== null) setZoom(fit);
+                }}
+                title="Fit canvas to screen (⌘0)"
+                className="w-12 rounded py-0.5 text-center font-semibold text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
+              >
+                {Math.round(zoom * 100)}%
+              </button>
+              <button
+                onClick={() => {
+                  setAutoFit(false);
+                  setZoom((z) => Math.min(2.5, +(z + 0.1).toFixed(2)));
+                }}
+                title="Zoom in"
+                aria-label="Zoom in"
+                className="rounded p-1 text-[var(--muted)] hover:bg-[var(--surface-2)] cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Comments Drawer */}
+        <CommentsDrawer
+          open={commentsOpen}
+          onClose={() => {
+            setCommentsOpen(false);
+            setCommentMode(false);
+          }}
+          comments={comments}
+          activePageId={activePage.id}
+          commentMode={commentMode}
+          onToggleCommentMode={() => setCommentMode((m) => !m)}
+          onReply={handleReplyComment}
+          onResolve={handleResolveComment}
+        />
+      </div>
+
+      {/* Modals */}
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        title={title}
+        pages={pages}
+        activePageIndex={activePageIdx}
+        width={width}
+        height={height}
+      />
+
+      <ShareModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        designId={initialDesign.id}
+        shareConfig={shareConfig}
+        onChangeShare={(next) => {
+          setShareConfig(next);
+          void persistDesign({ shareConfig: next });
+        }}
+      />
+
+      <MagicResizeModal
+        open={resizeOpen}
+        onClose={() => setResizeOpen(false)}
+        currentWidth={width}
+        currentHeight={height}
+        onResize={handleMagicResize}
+      />
+
+      <VersionHistoryModal
+        open={versionsOpen}
+        onClose={() => setVersionsOpen(false)}
+        versions={versions}
+        onSaveVersion={(label) => {
+          const snap: DesignVersion = {
+            id: makeId("ver"),
+            label,
+            createdAt: Date.now(),
+            createdBy: user?.display_name || "You",
+            pages: JSON.parse(JSON.stringify(pages)) as DesignPage[],
+            width,
+            height,
+          };
+          const nextVersions = [snap, ...versions].slice(0, 20);
+          setVersions(nextVersions);
+          void persistDesign({ versions: nextVersions });
+          notify(`Saved checkpoint "${label}"`);
+        }}
+        onRestoreVersion={(v) => {
+          setWidth(v.width);
+          setHeight(v.height);
+          setPages(JSON.parse(JSON.stringify(v.pages)) as DesignPage[]);
+          setActivePageIdx(0);
+          setSelectedIds([]);
+          pushHistory(v.pages, v.width, v.height);
+          notify(`Restored "${v.label}"`);
+        }}
+      />
+
+      <PresentOverlay
+        open={presentOpen}
+        onClose={() => setPresentOpen(false)}
+        pages={pages}
+        initialIndex={activePageIdx}
+        width={width}
+        height={height}
+      />
+
+      <LogoMakerModal
+        open={logoMakerOpen}
+        onClose={() => setLogoMakerOpen(false)}
+        onInsertOnCanvas={(logoName, dataUrl) => {
+          const size = Math.round(Math.min(width, height) * 0.34);
+          handleAddElement({
+            id: makeId("el"),
+            type: "image",
+            name: logoName,
+            src: dataUrl,
+            x: Math.round((width - size) / 2),
+            y: Math.round((height - size) / 2),
+            width: size,
+            height: size,
+            rotation: 0,
+            opacity: 1,
+            borderRadius: 0,
+            fit: "contain",
+            mask: "none",
+            filters: { ...DEFAULT_IMAGE_FILTERS },
+          });
+          notify(`Inserted "${logoName}" onto slide`);
+        }}
+        onOpenInEditor={async (logoTitle, page) => {
+          await persistDesign();
+          const res = await fetch("/api/designs", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: logoTitle,
+              category: "logo",
+              width: 1000,
+              height: 1000,
+              pages: [page],
+            }),
+          });
+          const data = (await res.json().catch(() => null)) as { design?: DesignRecord } | null;
+          if (data?.design) {
+            router.push(`/design/${data.design.id}`);
+          } else {
+            notify("Could not create new logo file");
+          }
+        }}
+        onSaveToBrandKit={handleSaveLogoToBrand}
+      />
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-16 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-xl">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
