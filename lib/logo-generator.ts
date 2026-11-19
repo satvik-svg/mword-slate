@@ -488,3 +488,248 @@ export function logoConceptToDesignPage(concept: LogoConcept): DesignPage {
       height: 260,
       rotation: 0,
       opacity: 1,
+      fill: concept.primaryColor,
+      gradientTo: concept.accentColor,
+      gradientAngle: 135,
+      stroke: "transparent",
+      strokeWidth: 0,
+      borderRadius: 56,
+    });
+    elements.push({
+      id: makeId("el"),
+      type: "icon",
+      name: "Mark Symbol",
+      iconId: concept.iconId,
+      x: 432,
+      y: 282,
+      width: 136,
+      height: 136,
+      rotation: 0,
+      opacity: 1,
+      color: iconStrokeOnFill,
+      strokeWidth: 2,
+    });
+    elements.push({
+      id: makeId("el"),
+      type: "text",
+      name: "Brand Name",
+      text: nameText,
+      x: 100,
+      y: 545,
+      width: 800,
+      height: 115,
+      rotation: 0,
+      opacity: 1,
+      fontFamily: concept.fontFamily,
+      fontSize: nameText.length > 12 ? 64 : 84,
+      fontWeight: 700,
+      color: concept.textColor,
+      align: "center",
+      lineHeight: 1.08,
+      letterSpacing: concept.letterSpacing,
+    });
+    if (concept.tagline) {
+      elements.push({
+        id: makeId("el"),
+        type: "text",
+        name: "Tagline",
+        text: concept.tagline.toUpperCase(),
+        x: 140,
+        y: 672,
+        width: 720,
+        height: 46,
+        rotation: 0,
+        opacity: 0.72,
+        fontFamily: concept.taglineFont,
+        fontSize: 22,
+        fontWeight: 500,
+        color: concept.textColor,
+        align: "center",
+        lineHeight: 1.2,
+        letterSpacing: 5,
+      });
+    }
+  }
+
+  return {
+    id: makeId("pg"),
+    name: `${concept.brandName} Logo`,
+    background: concept.bgColor,
+    elements,
+  };
+}
+
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function isColorDark(hex: string): boolean {
+  const clean = hex.replace("#", "");
+  if (clean.length !== 6) return false;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 < 140;
+}
+
+export function renderLogoConceptSvg(
+  concept: LogoConcept,
+  opts?: { transparent?: boolean; darkMode?: boolean; iconOnly?: boolean },
+): string {
+  const icon = getVectorIcon(concept.iconId);
+  const nameText = escapeXml(concept.uppercase ? concept.brandName.toUpperCase() : concept.brandName);
+  const tagText = escapeXml(concept.tagline.toUpperCase());
+  const initials = escapeXml(getInitials(concept.brandName));
+  const bg = opts?.transparent
+    ? "none"
+    : opts?.darkMode
+      ? "#0F172A"
+      : concept.bgColor;
+  const textCol = opts?.darkMode ? "#F8FAFC" : concept.textColor;
+  const iconCol = isColorDark(concept.primaryColor) ? "#FFFFFF" : "#0F172A";
+
+  const shapeEl = (x: number, y: number, size: number, fill: string, stroke = "none", sw = 0) => {
+    if (concept.shapeKind === "circle") {
+      return `<circle cx="${x + size / 2}" cy="${y + size / 2}" r="${size / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    }
+    if (concept.shapeKind === "hexagon") {
+      const cx = x + size / 2;
+      const cy = y + size / 2;
+      const r = size / 2;
+      const pts = Array.from({ length: 6 }, (_, i) => {
+        const a = ((i * 60 - 30) * Math.PI) / 180;
+        return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+      }).join(" ");
+      return `<polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    }
+    if (concept.shapeKind === "diamond") {
+      const cx = x + size / 2;
+      const cy = y + size / 2;
+      const r = size / 2;
+      return `<polygon points="${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    }
+    return `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="${Math.round(size * 0.22)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+  };
+
+  const iconPaths = (x: number, y: number, size: number, col: string) =>
+    `<g transform="translate(${x},${y}) scale(${(size / 24).toFixed(3)})" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icon.paths
+      .map((d) => `<path d="${d}"/>`)
+      .join("")}</g>`;
+
+  if (opts?.iconOnly) {
+    const inner =
+      concept.layout === "monogram-square" || concept.layout === "monogram-circle"
+        ? `<text x="500" y="575" text-anchor="middle" font-family="${concept.fontFamily}, sans-serif" font-size="310" font-weight="800" fill="${iconCol}">${initials}</text>`
+        : iconPaths(280, 280, 440, iconCol);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${concept.primaryColor}"/><stop offset="100%" stop-color="${concept.accentColor}"/></linearGradient></defs>
+      ${shapeEl(110, 110, 780, "url(#g)")}
+      ${inner}
+    </svg>`;
+  }
+
+  let body = "";
+  if (concept.layout === "horizontal") {
+    body = `
+      ${shapeEl(120, 395, 190, "url(#g)")}
+      ${iconPaths(165, 440, 100, iconCol)}
+      <text x="355" y="${tagText ? 495 : 520}" font-family="${concept.fontFamily}, sans-serif" font-size="${nameText.length > 10 ? 64 : 84}" font-weight="700" letter-spacing="${concept.letterSpacing}" fill="${textCol}">${nameText}</text>
+      ${tagText ? `<text x="358" y="552" font-family="${concept.taglineFont}, sans-serif" font-size="22" font-weight="500" letter-spacing="4" opacity="0.72" fill="${textCol}">${tagText}</text>` : ""}
+    `;
+  } else if (concept.layout === "monogram-square" || concept.layout === "monogram-circle") {
+    body = `
+      ${shapeEl(340, 210, 320, "url(#g)")}
+      <text x="500" y="420" text-anchor="middle" font-family="${concept.fontFamily}, sans-serif" font-size="136" font-weight="800" fill="${iconCol}">${initials}</text>
+      <text x="500" y="655" text-anchor="middle" font-family="${concept.fontFamily}, sans-serif" font-size="${nameText.length > 12 ? 60 : 78}" font-weight="700" letter-spacing="${concept.letterSpacing}" fill="${textCol}">${nameText}</text>
+      ${tagText ? `<text x="500" y="725" text-anchor="middle" font-family="${concept.taglineFont}, sans-serif" font-size="22" font-weight="500" letter-spacing="5" opacity="0.72" fill="${textCol}">${tagText}</text>` : ""}
+    `;
+  } else if (concept.layout === "wordmark-accent") {
+    body = `
+      <rect x="420" y="348" width="160" height="14" rx="7" fill="${concept.accentColor}"/>
+      <text x="500" y="510" text-anchor="middle" font-family="${concept.fontFamily}, sans-serif" font-size="${nameText.length > 12 ? 84 : 112}" font-weight="700" letter-spacing="${concept.letterSpacing}" fill="${textCol}">${nameText}</text>
+      ${tagText ? `<text x="500" y="592" text-anchor="middle" font-family="${concept.taglineFont}, sans-serif" font-size="24" font-weight="500" letter-spacing="6" opacity="0.8" fill="${concept.accentColor}">${tagText}</text>` : ""}
+    `;
+  } else if (concept.layout === "badge") {
+    body = `
+      ${shapeEl(240, 190, 520, "none", concept.primaryColor, 14)}
+      ${iconPaths(420, 275, 160, concept.accentColor)}
+      <text x="500" y="548" text-anchor="middle" font-family="${concept.fontFamily}, sans-serif" font-size="${nameText.length > 12 ? 52 : 68}" font-weight="800" letter-spacing="${concept.letterSpacing}" fill="${textCol}">${nameText}</text>
+      ${tagText ? `<text x="500" y="782" text-anchor="middle" font-family="${concept.taglineFont}, sans-serif" font-size="22" font-weight="500" letter-spacing="5" opacity="0.72" fill="${textCol}">${tagText}</text>` : ""}
+    `;
+  } else {
+    body = `
+      ${shapeEl(370, 220, 260, "url(#g)")}
+      ${iconPaths(432, 282, 136, iconCol)}
+      <text x="500" y="625" text-anchor="middle" font-family="${concept.fontFamily}, sans-serif" font-size="${nameText.length > 12 ? 64 : 84}" font-weight="700" letter-spacing="${concept.letterSpacing}" fill="${textCol}">${nameText}</text>
+      ${tagText ? `<text x="500" y="700" text-anchor="middle" font-family="${concept.taglineFont}, sans-serif" font-size="22" font-weight="500" letter-spacing="5" opacity="0.72" fill="${textCol}">${tagText}</text>` : ""}
+    `;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${concept.primaryColor}"/><stop offset="100%" stop-color="${concept.accentColor}"/></linearGradient></defs>
+    ${bg !== "none" ? `<rect width="1000" height="1000" fill="${bg}"/>` : ""}
+    ${body}
+  </svg>`;
+}
+
+async function svgToPngBlob(svg: string, size: number): Promise<Blob> {
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("SVG rasterize failed"));
+      el.src = url;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas context unavailable");
+    ctx.drawImage(img, 0, 0, size, size);
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG encode failed"))), "image/png");
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export async function downloadLogoPackZip(concept: LogoConcept): Promise<void> {
+  const zip = new JSZip();
+  const slug = concept.brandName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "logo";
+
+  const primarySvg = renderLogoConceptSvg(concept, { transparent: false });
+  const transparentSvg = renderLogoConceptSvg(concept, { transparent: true });
+  const darkSvg = renderLogoConceptSvg(concept, { darkMode: true });
+  const iconSvg = renderLogoConceptSvg(concept, { transparent: true, iconOnly: true });
+
+  zip.file(`${slug}-logo.svg`, primarySvg);
+  zip.file(`${slug}-logo-transparent.svg`, transparentSvg);
+  zip.file(`${slug}-logo-dark.svg`, darkSvg);
+  zip.file(`${slug}-icon.svg`, iconSvg);
+
+  zip.file(`${slug}-logo-1024.png`, await svgToPngBlob(primarySvg, 1024));
+  zip.file(`${slug}-logo-transparent-1024.png`, await svgToPngBlob(transparentSvg, 1024));
+  zip.file(`${slug}-logo-dark-1024.png`, await svgToPngBlob(darkSvg, 1024));
+  zip.file(`${slug}-icon-512.png`, await svgToPngBlob(iconSvg, 512));
+  zip.file(`${slug}-icon-192.png`, await svgToPngBlob(iconSvg, 192));
+  zip.file(`${slug}-favicon-64.png`, await svgToPngBlob(iconSvg, 64));
+
+  const out = await zip.generateAsync({ type: "blob" });
+  const url = URL.createObjectURL(out);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${slug}-logo-pack.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function svgToDataUrl(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
