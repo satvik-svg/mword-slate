@@ -710,3 +710,359 @@ export function StudioEditor({
           pushHistory(next);
           return next;
         });
+        setSelectedIds(pasted.map((p) => p.id));
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length) {
+        e.preventDefault();
+        handleDeleteElements(selectedIds);
+        return;
+      }
+      if (
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) &&
+        selectedIds.length
+      ) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        updateActivePageElements((els) =>
+          els.map((el) =>
+            selectedIds.includes(el.id) && !el.locked
+              ? { ...el, x: el.x + dx, y: el.y + dy }
+              : el,
+          ),
+        );
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    readOnly,
+    undo,
+    redo,
+    computeFitZoom,
+    handleDuplicateSelected,
+    handleGroupToggle,
+    handleDeleteElements,
+    selectedIds,
+    selectedElements,
+    activePageIdx,
+    pushHistory,
+    updateActivePageElements,
+  ]);
+
+  // Page management
+  const addPage = () => {
+    const newPage: DesignPage = {
+      id: makeId("pg"),
+      name: `Page ${pages.length + 1}`,
+      background: "#FFFFFF",
+      elements: [],
+    };
+    const next = [...pages, newPage];
+    setPages(next);
+    setActivePageIdx(next.length - 1);
+    setSelectedIds([]);
+    pushHistory(next);
+  };
+
+  const duplicatePage = (idx: number) => {
+    const src = pages[idx];
+    if (!src) return;
+    const copy: DesignPage = {
+      ...JSON.parse(JSON.stringify(src)),
+      id: makeId("pg"),
+      name: `${src.name} (Copy)`,
+      elements: src.elements.map((e) => ({ ...JSON.parse(JSON.stringify(e)), id: makeId("el") })),
+    };
+    const next = [...pages.slice(0, idx + 1), copy, ...pages.slice(idx + 1)];
+    setPages(next);
+    setActivePageIdx(idx + 1);
+    pushHistory(next);
+  };
+
+  const deletePage = (idx: number) => {
+    if (pages.length <= 1) return;
+    const next = pages.filter((_, i) => i !== idx);
+    setPages(next);
+    setActivePageIdx(Math.max(0, Math.min(idx, next.length - 1)));
+    setSelectedIds([]);
+    pushHistory(next);
+  };
+
+  // Comments
+  const handlePinComment = (xPct: number, yPct: number) => {
+    const text = window.prompt("Add comment:");
+    if (!text?.trim()) {
+      setCommentMode(false);
+      return;
+    }
+    const nextComment: DesignComment = {
+      id: makeId("cmt"),
+      pageId: activePage.id,
+      x: xPct,
+      y: yPct,
+      authorName: user?.display_name || "Guest",
+      authorEmail: user?.email || "",
+      text: text.trim(),
+      createdAt: Date.now(),
+      replies: [],
+    };
+    const nextComments = [...comments, nextComment];
+    setComments(nextComments);
+    setCommentMode(false);
+    setCommentsOpen(true);
+    void persistDesign({ comments: nextComments });
+  };
+
+  const handleReplyComment = (commentId: string, text: string) => {
+    const nextComments = comments.map((c) =>
+      c.id === commentId
+        ? {
+            ...c,
+            replies: [
+              ...c.replies,
+              {
+                id: makeId("rep"),
+                authorName: user?.display_name || "Guest",
+                authorEmail: user?.email || "",
+                text,
+                createdAt: Date.now(),
+              },
+            ],
+          }
+        : c,
+    );
+    setComments(nextComments);
+    void persistDesign({ comments: nextComments });
+  };
+
+  const handleResolveComment = (commentId: string) => {
+    const nextComments = comments.map((c) =>
+      c.id === commentId ? { ...c, resolved: true } : c,
+    );
+    setComments(nextComments);
+    void persistDesign({ comments: nextComments });
+  };
+
+  // Magic Resize
+  const handleMagicResize = async (newW: number, newH: number, asCopy: boolean) => {
+    const resizedPages = magicResizePages(pages, width, height, newW, newH);
+    if (asCopy) {
+      const res = await fetch("/api/designs", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `${title} (${newW}×${newH})`,
+          category: initialDesign.category,
+          width: newW,
+          height: newH,
+          pages: resizedPages,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as { design?: DesignRecord } | null;
+      if (data?.design) {
+        router.push(`/design/${data.design.id}`);
+      }
+      return;
+    }
+    setWidth(newW);
+    setHeight(newH);
+    setPages(resizedPages);
+    pushHistory(resizedPages, newW, newH);
+    notify(`Resized to ${newW} × ${newH} px`);
+  };
+
+  // PPTX Import inside Editor
+  const handleImportPptx = async (file: File) => {
+    try {
+      notify("Importing PowerPoint slides…");
+      const imported = await importPptxFile(file);
+      setWidth(imported.width);
+      setHeight(imported.height);
+      setPages(imported.pages);
+      setActivePageIdx(0);
+      setTitle(imported.title);
+      pushHistory(imported.pages, imported.width, imported.height);
+      notify(`Imported ${imported.pages.length} editable slides!`);
+    } catch {
+      notify("Could not read PPTX file");
+    }
+  };
+
+  // Upload media
+  const handleUploadMedia = async (asset: {
+    name: string;
+    mimeType: string;
+    dataUrl: string;
+    width: number;
+    height: number;
+    sizeBytes: number;
+  }) => {
+    const res = await fetch("/api/media", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(asset),
+    });
+    const data = (await res.json().catch(() => null)) as { asset?: MediaAsset } | null;
+    if (data?.asset) {
+      setMedia((prev) => [data.asset!, ...prev]);
+      return data.asset;
+    }
+    return null;
+  };
+
+  const handleDeleteMedia = async (id: string) => {
+    setMedia((prev) => prev.filter((m) => m.id !== id));
+    await fetch(`/api/media?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+  };
+
+  const handleSaveAsTeamTemplate = async () => {
+    let thumb = "";
+    try {
+      thumb = await generateThumbnail(pages[0], width, height);
+    } catch {
+      // ignore
+    }
+    const res = await fetch("/api/templates", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        category: initialDesign.category,
+        width,
+        height,
+        thumbnail: thumb,
+        pages,
+      }),
+    });
+    const data = (await res.json().catch(() => null)) as { template?: TemplateRecord } | null;
+    if (data?.template) {
+      setTeamTemplates((prev) => [data.template!, ...prev]);
+      notify("Saved to Team Templates");
+    }
+  };
+
+  const handleSaveLogoToBrand = async (
+    logos: BrandLogoItem[],
+    colors: string[],
+    font: string,
+  ) => {
+    const nextKit: BrandKit = {
+      ...brandKit,
+      logos: [...logos, ...brandKit.logos].slice(0, 12),
+      colors: Array.from(new Set([...colors, ...brandKit.colors])).slice(0, 8),
+      fonts: { ...brandKit.fonts, heading: font },
+      updatedAt: Date.now(),
+    };
+    setBrandKit(nextKit);
+    await fetch("/api/brand-kit", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nextKit),
+    });
+    notify("Logo & colors saved to Brand Kit");
+  };
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)]">
+      <TopToolbar
+        title={title}
+        onTitleChange={setTitle}
+        saveStatus={saveStatus}
+        canUndo={historyMeta.idx > 0}
+        canRedo={historyMeta.idx < historyMeta.len - 1}
+        onUndo={undo}
+        onRedo={redo}
+        onOpenResize={() => setResizeOpen(true)}
+        onOpenVersions={() => setVersionsOpen(true)}
+        onToggleComments={() => setCommentsOpen((o) => !o)}
+        commentCount={comments.filter((c) => !c.resolved).length}
+        onOpenPresent={() => setPresentOpen(true)}
+        onOpenShare={() => setShareOpen(true)}
+        onOpenExport={() => setExportOpen(true)}
+        readOnly={readOnly}
+        page={activePage}
+        onUpdatePage={updateActivePage}
+        selectedElements={selectedElements}
+        onUpdateElement={handleUpdateElement}
+        onDuplicateSelected={handleDuplicateSelected}
+        onDeleteSelected={() => handleDeleteElements(selectedIds)}
+        onGroupToggle={handleGroupToggle}
+        onAlign={handleAlign}
+        onCopyStyle={handleCopyStyle}
+        onPasteStyle={handlePasteStyle}
+        hasCopiedStyle={!!copiedStyle}
+        onOpenPhotoTab={() => setRailTab("photo")}
+      />
+
+      {/* Main Studio Body */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {!readOnly && (
+          <LeftRail
+            activeTab={railTab}
+            onTabChange={setRailTab}
+            width={width}
+            height={height}
+            page={activePage}
+            selectedElement={singleSelected}
+            selectedIds={selectedIds}
+            onSelect={setSelectedIds}
+            onAddElement={handleAddElement}
+            onUpdateElement={handleUpdateElement}
+            onDeleteElements={handleDeleteElements}
+            onReorderLayer={handleReorderLayer}
+            onApplyTemplate={(tplPages, tw, th) => {
+              setWidth(tw);
+              setHeight(th);
+              setPages(tplPages);
+              setActivePageIdx(0);
+              setSelectedIds([]);
+              pushHistory(tplPages, tw, th);
+              notify("Template applied");
+            }}
+            teamTemplates={teamTemplates}
+            onSaveAsTeamTemplate={handleSaveAsTeamTemplate}
+            media={media}
+            onUploadMedia={handleUploadMedia}
+            onDeleteMedia={handleDeleteMedia}
+            onImportPptx={handleImportPptx}
+            brandKit={brandKit}
+            pageCount={pages.length}
+            onUpdateBrandKit={handleUpdateBrandKit}
+            onApplyBrandStyle={handleApplyBrandStyle}
+            onApplySwatchColor={handleApplySwatchColor}
+            onApplyBrandFont={handleApplyBrandFont}
+            drawTool={drawTool}
+            onChangeDrawTool={setDrawTool}
+            onOpenLogoMaker={() => setLogoMakerOpen(true)}
+          />
+        )}
+
+        {/* Center Stage or Grid View */}
+        <div
+          ref={stageContainerRef}
+          className="flex min-w-0 flex-1 flex-col overflow-hidden"
+        >
+          {gridView ? (
+            <div className="flex-1 overflow-y-auto bg-[var(--stage)] p-8">
+              <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {pages.map((p, idx) => (
+                  <div
+                    key={p.id}
+                    onClick={() => {
+                      setActivePageIdx(idx);
+                      setGridView(false);
+                    }}
+                    className={`flex flex-col overflow-hidden rounded-2xl border bg-[var(--surface)] p-3 shadow-md transition cursor-pointer ${
+                      idx === activePageIdx
+                        ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
+                        : "border-[var(--border)] hover:border-[var(--accent)]"
