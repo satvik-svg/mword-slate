@@ -516,3 +516,262 @@ export function CanvasStage({
           className="relative shadow-2xl ring-1 ring-black/10"
           style={{
             width: width * zoom,
+            height: height * zoom,
+          }}
+        >
+          {/* Scaled Canvas Surface */}
+          <div
+            className={`origin-top-left ${page.background === "transparent" ? "checker-bg" : ""}`}
+            style={{
+              width,
+              height,
+              transform: `scale(${zoom})`,
+              position: "relative",
+              overflow: "hidden",
+              ...pageBackgroundStyle(page),
+            }}
+          >
+            {page.elements
+              .filter((el) => !el.hidden)
+              .map((el) => {
+                const isSelected = selectedIds.includes(el.id);
+                const isEditing = editingId === el.id;
+                return (
+                  <div
+                    key={el.id}
+                    onMouseDown={(e) => handleElementMouseDown(e, el)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (!readOnly && !el.locked && (el.type === "text" || el.type === "table")) {
+                        setEditingId(el.id);
+                      }
+                    }}
+                    style={{
+                      position: "absolute",
+                      left: el.x,
+                      top: el.y,
+                      width: el.width,
+                      height: el.height,
+                      opacity: el.opacity ?? 1,
+                      transform: `rotate(${el.rotation || 0}deg) scaleX(${el.flipX ? -1 : 1}) scaleY(${el.flipY ? -1 : 1})`,
+                      outline:
+                        isSelected && selectedIds.length > 1
+                          ? `${1.5 / zoom}px solid #2563EB`
+                          : undefined,
+                      cursor: readOnly
+                        ? "default"
+                        : el.locked
+                          ? "not-allowed"
+                          : isEditing
+                            ? "text"
+                            : "move",
+                    }}
+                  >
+                    <ElementRenderer
+                      element={el}
+                      editing={isEditing}
+                      onChangeText={(text) =>
+                        onUpdateElements((els) =>
+                          els.map((item) => (item.id === el.id ? { ...item, text } : item)),
+                        )
+                      }
+                      onEndEdit={() => {
+                        setEditingId(null);
+                        onCommitHistory();
+                      }}
+                      onChangeTableCell={(r, c, value) =>
+                        onUpdateElements((els) =>
+                          els.map((item) => {
+                            if (item.id !== el.id || item.type !== "table") return item;
+                            const nextRows = (item as TableElement).rows.map((row, ri) =>
+                              ri === r ? row.map((cell, ci) => (ci === c ? value : cell)) : row,
+                            );
+                            return { ...item, rows: nextRows };
+                          }),
+                        )
+                      }
+                    />
+                  </div>
+                );
+              })}
+
+            {/* Live freehand stroke preview */}
+            {liveStroke && liveStroke.length > 1 && (
+              <svg className="pointer-events-none absolute inset-0" width={width} height={height}>
+                <path
+                  d={liveStroke
+                    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+                    .join(" ")}
+                  fill="none"
+                  stroke={drawTool.color}
+                  strokeWidth={drawTool.strokeWidth}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={drawTool.brush === "highlighter" ? 0.42 : 1}
+                />
+              </svg>
+            )}
+
+            {/* Magnetic Alignment Guides */}
+            {guides.map((g, idx) =>
+              g.orientation === "v" ? (
+                <div
+                  key={idx}
+                  className="pointer-events-none absolute top-0 bottom-0"
+                  style={{ left: g.pos, width: Math.max(1, 1.5 / zoom), background: "#EC4899" }}
+                />
+              ) : (
+                <div
+                  key={idx}
+                  className="pointer-events-none absolute left-0 right-0"
+                  style={{ top: g.pos, height: Math.max(1, 1.5 / zoom), background: "#EC4899" }}
+                />
+              ),
+            )}
+
+            {/* Marquee selection box */}
+            {drag?.kind === "marquee" && (
+              <div
+                className="pointer-events-none absolute border border-blue-500 bg-blue-500/10"
+                style={{
+                  left: Math.min(drag.startX, drag.currX),
+                  top: Math.min(drag.startY, drag.currY),
+                  width: Math.abs(drag.currX - drag.startX),
+                  height: Math.abs(drag.currY - drag.startY),
+                }}
+              />
+            )}
+          </div>
+
+          {/* Empty-canvas beginner quick-start overlay (non-exported) */}
+          {!readOnly &&
+            !drawTool.active &&
+            !commentMode &&
+            page.elements.length === 0 &&
+            !page.backgroundImage && (
+              <div
+                onMouseDown={(e) => e.stopPropagation()}
+                className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-6 text-center select-none"
+              >
+                <div className="pointer-events-auto flex max-w-sm flex-col items-center rounded-2xl border border-black/8 bg-white/90 px-5 py-4 shadow-sm backdrop-blur-xs">
+                  <p className="text-xs font-semibold text-neutral-900">Start designing</p>
+                  <p className="mt-0.5 text-[11px] text-neutral-500">
+                    Pick a template on the left or drop something onto your page
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
+                    {onQuickAddHeading && (
+                      <button
+                        type="button"
+                        onClick={onQuickAddHeading}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-neutral-800 cursor-pointer"
+                      >
+                        <Type className="h-3.5 w-3.5" /> Add heading
+                      </button>
+                    )}
+                    {onQuickOpenUploads && (
+                      <button
+                        type="button"
+                        onClick={onQuickOpenUploads}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[11px] font-medium text-neutral-800 transition hover:bg-neutral-50 cursor-pointer"
+                      >
+                        <ImagePlus className="h-3.5 w-3.5 text-neutral-500" /> Upload image
+                      </button>
+                    )}
+                    {onQuickOpenTemplates && (
+                      <button
+                        type="button"
+                        onClick={onQuickOpenTemplates}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[11px] font-medium text-neutral-800 transition hover:bg-neutral-50 cursor-pointer"
+                      >
+                        <LayoutTemplate className="h-3.5 w-3.5 text-neutral-500" /> Templates
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-3 text-[10px] text-neutral-400">
+                    Double-click text to edit · Drag corners to resize · ⌘Z to undo
+                  </p>
+                </div>
+              </div>
+            )}
+
+          {/* Selection Overlay (unscaled crisp handles) */}
+          {singleSelected && !readOnly && (
+            <div
+              className="pointer-events-none absolute"
+              style={{
+                left: singleSelected.x * zoom,
+                top: singleSelected.y * zoom,
+                width: singleSelected.width * zoom,
+                height: singleSelected.height * zoom,
+                transform: `rotate(${singleSelected.rotation || 0}deg)`,
+              }}
+            >
+              <div className="absolute inset-0 border-[1.5px] border-[#2563EB]" />
+              {singleSelected.locked ? (
+                <div className="absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-neutral-900 px-2 py-0.5 text-[10px] font-medium text-white inline-flex items-center gap-1">
+                  <Lock className="h-3 w-3" /> Locked
+                </div>
+              ) : (
+                <>
+                  {(
+                    [
+                      { h: "nw", cls: "-left-1.5 -top-1.5 cursor-nwse-resize" },
+                      { h: "n", cls: "left-1/2 -top-1.5 -translate-x-1/2 cursor-ns-resize" },
+                      { h: "ne", cls: "-right-1.5 -top-1.5 cursor-nesw-resize" },
+                      { h: "e", cls: "-right-1.5 top-1/2 -translate-y-1/2 cursor-ew-resize" },
+                      { h: "se", cls: "-right-1.5 -bottom-1.5 cursor-nwse-resize" },
+                      { h: "s", cls: "left-1/2 -bottom-1.5 -translate-x-1/2 cursor-ns-resize" },
+                      { h: "sw", cls: "-left-1.5 -bottom-1.5 cursor-nesw-resize" },
+                      { h: "w", cls: "-left-1.5 top-1/2 -translate-y-1/2 cursor-ew-resize" },
+                    ] as const
+                  ).map(({ h, cls }) => (
+                    <div
+                      key={h}
+                      onMouseDown={(e) => startResize(e, singleSelected, h)}
+                      className={`pointer-events-auto absolute h-2.5 w-2.5 rounded-[2px] border-[1.5px] border-[#2563EB] bg-white shadow-xs ${cls}`}
+                    />
+                  ))}
+
+                  {/* Rotate handle */}
+                  <button
+                    type="button"
+                    onMouseDown={(e) => startRotate(e, singleSelected)}
+                    title="Drag to rotate (Shift snaps 15°)"
+                    className="pointer-events-auto absolute -bottom-8 left-1/2 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border border-[var(--border)] bg-white text-neutral-700 shadow-sm hover:border-[#2563EB] hover:text-[#2563EB] cursor-grab"
+                  >
+                    <RotateCw className="h-3 w-3" />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Pinned Comment Markers */}
+          {pageComments.map((c, idx) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectComment?.(c.id);
+              }}
+              style={{ left: `${c.x}%`, top: `${c.y}%` }}
+              title={`${c.authorName}: ${c.text}`}
+              className="absolute z-20 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-[#141417] text-[10px] font-semibold text-white shadow-md hover:scale-110 transition cursor-pointer"
+            >
+              {idx + 1}
+            </button>
+          ))}
+
+          {/* Comment Mode Banner */}
+          {commentMode && (
+            <div className="pointer-events-none absolute -top-10 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full bg-[#141417] px-3 py-1 text-xs font-medium text-white shadow-md">
+              <MessageSquare className="h-3.5 w-3.5" />
+              Click anywhere on the page to pin a comment
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
