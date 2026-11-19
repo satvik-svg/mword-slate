@@ -782,3 +782,395 @@ export function LeftRail({
               <>
                 <div className="space-y-2">
                   <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] py-2.5 text-xs font-semibold text-[var(--accent-fg)] hover:opacity-95 cursor-pointer"
+                  >
+                    <Upload className="h-4 w-4" />
+                    {uploading ? "Uploading…" : "Upload Photos / SVGs"}
+                  </button>
+                  <button
+                    onClick={() => pptxRef.current?.click()}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-2 text-xs font-semibold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                  >
+                    <FileUp className="h-3.5 w-3.5 text-[var(--accent)]" />
+                    Import PowerPoint (.pptx)
+                  </button>
+                </div>
+
+                {media.length === 0 ? (
+                  <p className="py-6 text-center text-xs text-[var(--muted)]">
+                    Uploaded images are saved to your workspace library for reuse across designs.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {media.map((asset) => (
+                      <div
+                        key={asset.id}
+                        className="group relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)]"
+                      >
+                        <button
+                          onClick={() =>
+                            insertImageOnCanvas(asset.dataUrl, asset.name, asset.width, asset.height)
+                          }
+                          className="block aspect-square w-full cursor-pointer"
+                        >
+                          <img
+                            src={asset.dataUrl}
+                            alt={asset.name}
+                            className="h-full w-full object-cover"
+                          />
+                        </button>
+                        <button
+                          onClick={() => onDeleteMedia(asset.id)}
+                          title="Delete from library"
+                          className="absolute right-1.5 top-1.5 rounded-md bg-black/70 p-1 text-white opacity-0 transition group-hover:opacity-100 hover:bg-rose-600 cursor-pointer"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* PHOTO EDITOR */}
+            {activeTab === "photo" && (
+              <>
+                {!selectedImg ? (
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-4 text-center text-xs text-[var(--muted)]">
+                    <ImageIcon className="mx-auto mb-2 h-6 w-6 text-[var(--accent)]" />
+                    Select a photo on the canvas — or upload one to start editing filters, crop, masks, and background removal.
+                    <button
+                      onClick={() => fileRef.current?.click()}
+                      className="mt-3 w-full rounded-lg bg-[var(--accent)] py-2 font-semibold text-[var(--accent-fg)] cursor-pointer"
+                    >
+                      Upload Photo to Edit
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4 text-xs">
+                    {/* Background Remover */}
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                      <div className="flex items-center justify-between font-semibold text-[var(--fg)]">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Scissors className="h-3.5 w-3.5 text-[var(--accent)]" /> Background Remover
+                        </span>
+                        <span className="text-[10px] text-[var(--muted)]">In-Browser</span>
+                      </div>
+                      <div className="mt-2">
+                        <div className="flex justify-between text-[11px] text-[var(--muted)]">
+                          <span>Edge Tolerance</span>
+                          <span>{bgTolerance}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={10}
+                          max={90}
+                          value={bgTolerance}
+                          onChange={(e) => setBgTolerance(Number(e.target.value))}
+                          className="w-full accent-[var(--accent)]"
+                        />
+                      </div>
+                      <div className="mt-2 flex gap-1.5">
+                        <button
+                          onClick={handleSmartBgRemove}
+                          disabled={bgBusy}
+                          className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 font-semibold text-[var(--accent-fg)] cursor-pointer disabled:opacity-50"
+                        >
+                          {bgBusy ? "Removing…" : "Remove BG"}
+                        </button>
+                        {selectedImg.originalSrc && selectedImg.src !== selectedImg.originalSrc && (
+                          <button
+                            onClick={() =>
+                              onUpdateElement(
+                                selectedImg.id,
+                                { src: selectedImg.originalSrc } as Partial<ImageElement>,
+                                true,
+                              )
+                            }
+                            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 font-medium text-[var(--fg)] cursor-pointer"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick Crop */}
+                    <div>
+                      <div className="mb-1.5 flex items-center gap-1.5 font-semibold text-[var(--fg)]">
+                        <Crop className="h-3.5 w-3.5 text-[var(--accent)]" /> Quick Crop
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[
+                          { label: "1:1", r: 1 },
+                          { label: "4:5", r: 4 / 5 },
+                          { label: "16:9", r: 16 / 9 },
+                          { label: "3:2", r: 3 / 2 },
+                        ].map((c) => (
+                          <button
+                            key={c.label}
+                            onClick={() => void applyAspectCrop(c.r)}
+                            className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-1.5 font-semibold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Filter Presets */}
+                    <div>
+                      <div className="mb-1.5 font-semibold text-[var(--fg)]">Filter Presets</div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {FILTER_PRESETS.map((fp) => (
+                          <button
+                            key={fp.id}
+                            onClick={() =>
+                              onUpdateElement(
+                                selectedImg.id,
+                                {
+                                  filters: { preset: fp.id, ...fp.values },
+                                } as Partial<ImageElement>,
+                                true,
+                              )
+                            }
+                            className={`rounded-lg border px-2.5 py-1.5 text-left font-medium cursor-pointer ${
+                              selectedImg.filters?.preset === fp.id
+                                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                                : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)]"
+                            }`}
+                          >
+                            {fp.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Fine-Tune Sliders */}
+                    <div className="space-y-2.5">
+                      <div className="font-semibold text-[var(--fg)]">Adjustments</div>
+                      {(
+                        [
+                          { key: "brightness", label: "Brightness", min: 30, max: 180 },
+                          { key: "contrast", label: "Contrast", min: 30, max: 180 },
+                          { key: "saturation", label: "Saturation", min: 0, max: 200 },
+                          { key: "hue", label: "Warmth / Hue", min: -180, max: 180 },
+                          { key: "blur", label: "Blur", min: 0, max: 16 },
+                          { key: "vignette", label: "Vignette", min: 0, max: 100 },
+                        ] as const
+                      ).map((sl) => (
+                        <div key={sl.key}>
+                          <div className="flex justify-between text-[11px] text-[var(--muted)]">
+                            <span>{sl.label}</span>
+                            <span>{selectedImg.filters?.[sl.key] ?? 0}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={sl.min}
+                            max={sl.max}
+                            value={selectedImg.filters?.[sl.key] ?? 0}
+                            onChange={(e) =>
+                              onUpdateElement(selectedImg.id, {
+                                filters: {
+                                  ...(selectedImg.filters ?? DEFAULT_IMAGE_FILTERS),
+                                  preset: "none",
+                                  [sl.key]: Number(e.target.value),
+                                },
+                              } as Partial<ImageElement>)
+                            }
+                            className="w-full accent-[var(--accent)]"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Frame Masks */}
+                    <div>
+                      <div className="mb-1.5 font-semibold text-[var(--fg)]">Image Frame Mask</div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {MASKS.map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() =>
+                              onUpdateElement(
+                                selectedImg.id,
+                                { mask: m.id } as Partial<ImageElement>,
+                                true,
+                              )
+                            }
+                            className={`rounded-lg border py-1.5 text-[11px] font-medium cursor-pointer ${
+                              selectedImg.mask === m.id
+                                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                                : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)]"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* DRAW */}
+            {activeTab === "draw" && (
+              <div className="space-y-4 text-xs">
+                <div className="rounded-xl bg-[var(--accent-soft)] p-3 text-[var(--accent)]">
+                  Freehand draw is <strong>{drawTool.active ? "ON" : "OFF"}</strong>. Drag anywhere on the canvas to sketch vector strokes.
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(["pen", "marker", "highlighter"] as const).map((b) => (
+                    <button
+                      key={b}
+                      onClick={() =>
+                        onChangeDrawTool({
+                          ...drawTool,
+                          active: true,
+                          brush: b,
+                          strokeWidth: b === "pen" ? 4 : b === "marker" ? 12 : 24,
+                        })
+                      }
+                      className={`rounded-xl border py-2 font-semibold capitalize cursor-pointer ${
+                        drawTool.brush === b
+                          ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]"
+                          : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)]"
+                      }`}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-[11px] text-[var(--muted)]">
+                    <span>Stroke Thickness</span>
+                    <span>{drawTool.strokeWidth}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={2}
+                    max={48}
+                    value={drawTool.strokeWidth}
+                    onChange={(e) =>
+                      onChangeDrawTool({ ...drawTool, strokeWidth: Number(e.target.value) })
+                    }
+                    className="mt-1 w-full accent-[var(--accent)]"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-1.5 font-semibold text-[var(--fg)]">Brush Color</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {["#0F172A", "#4F46E5", "#06B6D4", "#F43F5E", "#F59E0B", "#10B981", "#FFFFFF"].map(
+                      (col) => (
+                        <button
+                          key={col}
+                          onClick={() => onChangeDrawTool({ ...drawTool, color: col })}
+                          className={`h-7 w-7 rounded-full border-2 cursor-pointer ${
+                            drawTool.color === col ? "border-[var(--accent)] scale-110" : "border-black/15"
+                          }`}
+                          style={{ background: col }}
+                        />
+                      ),
+                    )}
+                    <input
+                      type="color"
+                      value={drawTool.color}
+                      onChange={(e) => onChangeDrawTool({ ...drawTool, color: e.target.value })}
+                      className="h-7 w-7 cursor-pointer rounded"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onChangeDrawTool({ ...drawTool, active: !drawTool.active })}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-2 font-semibold text-[var(--fg)] cursor-pointer"
+                >
+                  <Eraser className="h-3.5 w-3.5" />
+                  {drawTool.active ? "Switch to Select Mode" : "Resume Drawing"}
+                </button>
+              </div>
+            )}
+
+            {/* BRAND KIT */}
+            {activeTab === "brand" && (
+              <div className="space-y-4 text-xs">
+                <input
+                  ref={brandLogoRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBrandLogoPick}
+                  className="hidden"
+                />
+
+                {/* Workspace Brand Kit Card */}
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate font-semibold text-[var(--fg)]">{brandKit.name}</div>
+                    <button
+                      onClick={() => setEditingBrand((v) => !v)}
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--fg)] cursor-pointer"
+                    >
+                      {editingBrand ? (
+                        <>
+                          <Check className="h-3 w-3" /> Done
+                        </>
+                      ) : (
+                        <>
+                          <Pencil className="h-3 w-3" /> Edit
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {editingBrand ? (
+                    <div className="mt-2.5 space-y-2.5">
+                      <div>
+                        <label className="text-[10px] font-medium text-[var(--muted)]">
+                          Brand name
+                        </label>
+                        <input
+                          value={brandKit.name}
+                          onChange={(e) =>
+                            void onUpdateBrandKit({ ...brandKit, name: e.target.value })
+                          }
+                          className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-medium text-[var(--muted)]">
+                          Palette colors
+                        </label>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {brandKit.colors.map((c, idx) => (
+                            <div key={idx} className="relative">
+                              <input
+                                type="color"
+                                value={c}
+                                onChange={(e) => {
+                                  const nextColors = [...brandKit.colors];
+                                  nextColors[idx] = e.target.value.toUpperCase();
+                                  void onUpdateBrandKit({ ...brandKit, colors: nextColors });
+                                }}
+                                className="h-7 w-7 cursor-pointer rounded-md border border-black/15"
+                              />
+                              {brandKit.colors.length > 2 && (
+                                <button
+                                  onClick={() =>
+                                    void onUpdateBrandKit({
+                                      ...brandKit,
+                                      colors: brandKit.colors.filter((_, i) => i !== idx),
+                                    })
+                                  }
+                                  title="Remove color"
+                                  className="absolute -right-1 -top-1 rounded-full bg-neutral-900 p-0.5 text-white cursor-pointer"
+                                >
+                                  <X className="h-2 w-2" />
+                                </button>
+                              )}
