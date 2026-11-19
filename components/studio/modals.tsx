@@ -564,3 +564,286 @@ export function VersionHistoryModal({
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Checkpoint name (e.g. Client v2)"
             className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--fg)] outline-none"
+          />
+          <button
+            onClick={() => {
+              onSaveVersion(label.trim() || `Snapshot ${versions.length + 1}`);
+              setLabel("");
+            }}
+            className="inline-flex items-center gap-1 rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-[var(--accent-fg)] cursor-pointer"
+          >
+            <Plus className="h-3.5 w-3.5" /> Save
+          </button>
+        </div>
+
+        <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
+          {versions.length === 0 ? (
+            <p className="py-6 text-center text-xs text-[var(--muted)]">
+              No saved checkpoints yet. Save a version before big changes.
+            </p>
+          ) : (
+            versions.map((v) => (
+              <div
+                key={v.id}
+                className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5"
+              >
+                <div>
+                  <div className="text-xs font-semibold text-[var(--fg)]">{v.label}</div>
+                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--muted)]">
+                    <Clock className="h-3 w-3" />
+                    {new Date(v.createdAt).toLocaleString()} • {v.pages.length}p
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    onRestoreVersion(v);
+                    onClose();
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-[11px] font-semibold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                >
+                  <RotateCcw className="h-3 w-3" /> Restore
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function PresentOverlay({
+  open,
+  onClose,
+  pages,
+  initialIndex,
+  width,
+  height,
+}: {
+  open: boolean;
+  onClose: () => void;
+  pages: DesignPage[];
+  initialIndex: number;
+  width: number;
+  height: number;
+}) {
+  const [index, setIndex] = useState(initialIndex);
+  const [showNotes, setShowNotes] = useState(false);
+  const [viewport, setViewport] = useState({ w: 1280, h: 720 });
+
+  useEffect(() => {
+    if (open) setIndex(initialIndex);
+  }, [open, initialIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    const sync = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    sync();
+    window.addEventListener("resize", sync);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight" || e.key === " ") setIndex((i) => Math.min(pages.length - 1, i + 1));
+      if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, pages.length, onClose]);
+
+  if (!open) return null;
+  const page = pages[index] ?? pages[0];
+  const maxW = viewport.w - 80;
+  const maxH = viewport.h - (showNotes ? 200 : 110);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#060911] text-white">
+      <div className="flex flex-1 items-center justify-center p-6">
+        <div
+          key={page.id}
+          className="overflow-hidden rounded-lg shadow-2xl ring-1 ring-white/10 transition-all duration-300"
+        >
+          <PagePreview page={page} width={width} height={height} maxWidth={maxW} maxHeight={maxH} />
+        </div>
+      </div>
+
+      {showNotes && (
+        <div className="mx-auto mb-2 w-full max-w-3xl rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-slate-300">
+          <div className="font-semibold text-white">Speaker Notes ({page.name})</div>
+          <p className="mt-1 whitespace-pre-wrap">{page.notes || "No speaker notes for this slide."}</p>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between border-t border-white/10 bg-black/50 px-6 py-3">
+        <div className="text-xs text-slate-400">
+          Slide {index + 1} / {pages.length} — {page.name}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            disabled={index === 0}
+            className="rounded-lg bg-white/10 p-2 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setIndex((i) => Math.min(pages.length - 1, i + 1))}
+            disabled={index === pages.length - 1}
+            className="rounded-lg bg-white/10 p-2 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setShowNotes((s) => !s)}
+            className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium hover:bg-white/20 cursor-pointer"
+          >
+            {showNotes ? "Hide Notes" : "Notes"}
+          </button>
+          <button
+            onClick={() => {
+              if (document.fullscreenElement) void document.exitFullscreen();
+              else void document.documentElement.requestFullscreen();
+            }}
+            className="rounded-lg bg-white/10 p-2 hover:bg-white/20 cursor-pointer"
+            title="Toggle Fullscreen"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-semibold hover:bg-rose-600 cursor-pointer"
+          >
+            Exit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function CommentsDrawer({
+  open,
+  onClose,
+  comments,
+  activePageId,
+  commentMode,
+  onToggleCommentMode,
+  onReply,
+  onResolve,
+}: {
+  open: boolean;
+  onClose: () => void;
+  comments: DesignComment[];
+  activePageId: string;
+  commentMode: boolean;
+  onToggleCommentMode: () => void;
+  onReply: (commentId: string, text: string) => void;
+  onResolve: (commentId: string) => void;
+}) {
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  if (!open) return null;
+
+  const pageComments = comments.filter((c) => c.pageId === activePageId);
+
+  return (
+    <div className="flex w-80 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)]">
+      <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
+        <div className="flex items-center gap-2 text-xs font-bold text-[var(--fg)]">
+          <MessageSquare className="h-4 w-4 text-[var(--accent)]" />
+          Comments ({pageComments.filter((c) => !c.resolved).length})
+        </div>
+        <button onClick={onClose} className="rounded p-1 text-[var(--muted)] hover:bg-[var(--surface-2)] cursor-pointer">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="border-b border-[var(--border)] p-3">
+        <button
+          onClick={onToggleCommentMode}
+          className={`w-full rounded-xl py-2 text-xs font-semibold transition cursor-pointer ${
+            commentMode
+              ? "bg-[#4F46E5] text-white"
+              : "border border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)] hover:border-[var(--accent)]"
+          }`}
+        >
+          {commentMode ? "Pin Mode Active — Click Canvas" : "+ Pin New Comment on Page"}
+        </button>
+      </div>
+
+      <div className="flex-1 space-y-3 overflow-y-auto p-3">
+        {pageComments.length === 0 ? (
+          <p className="py-8 text-center text-xs text-[var(--muted)]">
+            No comments on this page yet.
+          </p>
+        ) : (
+          pageComments.map((c, idx) => (
+            <div
+              key={c.id}
+              className={`rounded-xl border p-3 text-xs ${
+                c.resolved
+                  ? "border-[var(--border)] bg-[var(--surface-2)]/50 opacity-60"
+                  : "border-[var(--border)] bg-[var(--surface-2)]"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-[var(--fg)]">
+                  #{idx + 1} {c.authorName}
+                </span>
+                {!c.resolved && (
+                  <button
+                    onClick={() => onResolve(c.id)}
+                    className="text-[11px] font-medium text-emerald-600 hover:underline cursor-pointer"
+                  >
+                    Resolve
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-[var(--fg)]">{c.text}</p>
+
+              {c.replies.length > 0 && (
+                <div className="mt-2 space-y-1.5 border-t border-[var(--border)] pt-2">
+                  {c.replies.map((r) => (
+                    <div key={r.id} className="text-[11px]">
+                      <span className="font-semibold text-[var(--fg)]">{r.authorName}: </span>
+                      <span className="text-[var(--muted)]">{r.text}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!c.resolved && (
+                <div className="mt-2 flex gap-1">
+                  <input
+                    value={replyDrafts[c.id] || ""}
+                    onChange={(e) =>
+                      setReplyDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && replyDrafts[c.id]?.trim()) {
+                        onReply(c.id, replyDrafts[c.id].trim());
+                        setReplyDrafts((prev) => ({ ...prev, [c.id]: "" }));
+                      }
+                    }}
+                    placeholder="Reply…"
+                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] outline-none"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!replyDrafts[c.id]?.trim()) return;
+                      onReply(c.id, replyDrafts[c.id].trim());
+                      setReplyDrafts((prev) => ({ ...prev, [c.id]: "" }));
+                    }}
+                    className="rounded-lg bg-[var(--accent)] p-1.5 text-[var(--accent-fg)] cursor-pointer"
+                  >
+                    <Send className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
