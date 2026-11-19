@@ -175,3 +175,91 @@ test("Brand style keeps cards readable, preserves backgroundImage & transparent 
         height: 80,
         rotation: 0,
         opacity: 1,
+        fill: "transparent",
+        stroke: "#333333",
+        strokeWidth: 2,
+      },
+      {
+        id: "badge",
+        type: "shape",
+        shape: "pill",
+        x: 1250,
+        y: 220,
+        width: 140,
+        height: 44,
+        rotation: 0,
+        opacity: 1,
+        fill: "#7C3AED",
+        stroke: "transparent",
+        strokeWidth: 0,
+      },
+      {
+        id: "title",
+        type: "text",
+        x: 150,
+        y: 420,
+        width: 950,
+        height: 160,
+        rotation: 0,
+        opacity: 1,
+        text: "React Native / Supabase Demo App",
+        fontFamily: "Inter",
+        fontSize: 72,
+        fontWeight: 700,
+        color: "#111114",
+        align: "left",
+        lineHeight: 1.05,
+        letterSpacing: -1,
+      },
+    ],
+  };
+
+  const palette = ["#141417", "#2563EB", "#52525B", "#E4E4E7", "#FAFAFA"];
+  const styled = applyStyleToPage(slide, {
+    colors: palette,
+    fonts: { heading: "Plus Jakarta Sans", body: "Inter" },
+    applyColors: true,
+    applyFonts: true,
+    variant: 0,
+    pageWidth: 1920,
+    pageHeight: 1080,
+  });
+
+  // Background image preserved
+  assert.equal(styled.backgroundImage, slide.backgroundImage);
+
+  const card = styled.elements.find((e) => e.id === "card");
+  const outline = styled.elements.find((e) => e.id === "outline");
+  const badge = styled.elements.find((e) => e.id === "badge");
+  const title = styled.elements.find((e) => e.id === "title");
+
+  assert.ok(card && card.type === "shape");
+  assert.ok(outline && outline.type === "shape");
+  assert.ok(badge && badge.type === "shape");
+  assert.ok(title && title.type === "text");
+
+  // Container card remains a clean light surface (not painted neon accent)
+  assert.equal(isLightColor(card.fill), true);
+  // Transparent outline stays transparent
+  assert.equal(outline.fill, "transparent");
+  // Accent badge receives brand accent
+  assert.equal(badge.fill, "#2563EB");
+  // Title font updated & maintains strong contrast (>= 4.5) against its enclosing card
+  assert.equal(title.fontFamily, "Plus Jakarta Sans");
+  assert.ok(contrastRatio(card.fill, title.color) >= 4.5);
+
+  // Fonts-only mode must not alter colors
+  const fontsOnly = applyStyleToPage(slide, {
+    colors: palette,
+    fonts: { heading: "Fraunces", body: "DM Sans" },
+    applyColors: false,
+    applyFonts: true,
+  });
+  const fontsOnlyCard = fontsOnly.elements.find((e) => e.id === "card");
+  const fontsOnlyTitle = fontsOnly.elements.find((e) => e.id === "title");
+  assert.ok(fontsOnlyCard && fontsOnlyCard.type === "shape");
+  assert.ok(fontsOnlyTitle && fontsOnlyTitle.type === "text");
+  assert.equal(fontsOnlyCard.fill, "#EAEAF0");
+  assert.equal(fontsOnlyTitle.fontFamily, "Fraunces");
+});
+
