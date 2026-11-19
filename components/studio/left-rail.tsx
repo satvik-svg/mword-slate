@@ -390,3 +390,395 @@ export function LeftRail({
       x: Math.round(centerX - w / 2),
       y: Math.round(centerY - h / 2),
       width: Math.round(w),
+      height: Math.round(h),
+      rotation: 0,
+      opacity: 1,
+      fit: "cover",
+      borderRadius: 0,
+      mask: "none",
+      filters: { ...DEFAULT_IMAGE_FILTERS },
+    });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      for (const file of files) {
+        const opt = await readImageFileOptimized(file);
+        const saved = await onUploadMedia({
+          name: file.name,
+          mimeType: opt.mimeType,
+          dataUrl: opt.dataUrl,
+          width: opt.width,
+          height: opt.height,
+          sizeBytes: opt.sizeBytes,
+        });
+        insertImageOnCanvas(saved?.dataUrl || opt.dataUrl, file.name, opt.width, opt.height);
+      }
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  const handlePptxPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await onImportPptx(file);
+    e.target.value = "";
+  };
+
+  const selectedImg =
+    selectedElement?.type === "image" ? (selectedElement as ImageElement) : null;
+
+  const applyAspectCrop = async (ratio: number) => {
+    if (!selectedImg) return;
+    const baseSrc = selectedImg.originalSrc || selectedImg.src;
+    const img = new Image();
+    img.src = baseSrc;
+    await new Promise<void>((res) => {
+      img.onload = () => res();
+      img.onerror = () => res();
+    });
+    const iw = img.naturalWidth || 1000;
+    const ih = img.naturalHeight || 1000;
+    const currRatio = iw / ih;
+    let cw = 100;
+    let ch = 100;
+    let cx = 0;
+    let cy = 0;
+    if (currRatio > ratio) {
+      cw = (ratio / currRatio) * 100;
+      cx = (100 - cw) / 2;
+    } else {
+      ch = (currRatio / ratio) * 100;
+      cy = (100 - ch) / 2;
+    }
+    const cropped = await applyCropToImage(baseSrc, { x: cx, y: cy, width: cw, height: ch });
+    onUpdateElement(
+      selectedImg.id,
+      {
+        src: cropped,
+        height: Math.round(selectedImg.width / ratio),
+      } as Partial<ImageElement>,
+      true,
+    );
+  };
+
+  const handleSmartBgRemove = async () => {
+    if (!selectedImg) return;
+    setBgBusy(true);
+    try {
+      const cutout = await removeBackgroundInBrowser(
+        selectedImg.originalSrc || selectedImg.src,
+        bgTolerance,
+      );
+      onUpdateElement(selectedImg.id, { src: cutout } as Partial<ImageElement>, true);
+    } finally {
+      setBgBusy(false);
+    }
+  };
+
+  const filteredIcons = VECTOR_ICONS.filter((ic) => {
+    if (!iconQuery.trim()) return true;
+    const q = iconQuery.toLowerCase();
+    return (
+      ic.label.toLowerCase().includes(q) ||
+      ic.category.includes(q) ||
+      ic.tags.some((t) => t.includes(q))
+    );
+  });
+
+  const allTemplates = [...teamTemplates, ...BUILTIN_TEMPLATES].filter(
+    (t) => tplFilter === "all" || t.category === tplFilter || (tplFilter === "team" && t.isCustom),
+  );
+
+  return (
+    <div className="flex h-full shrink-0">
+      {/* Shared hidden file inputs so Uploads & Photo tabs can trigger upload */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={handleFileUpload}
+        className="hidden"
+      />
+      <input
+        ref={pptxRef}
+        type="file"
+        accept=".pptx"
+        onChange={handlePptxPick}
+        className="hidden"
+      />
+
+      {/* Slim Icon Rail */}
+      <div className="flex w-[68px] flex-col items-center gap-1 border-r border-[var(--border)] bg-[var(--surface)] py-2.5">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => {
+                const next = active ? null : tab.id;
+                onTabChange(next);
+                if (next === "draw") {
+                  onChangeDrawTool({ ...drawTool, active: true });
+                } else if (drawTool.active) {
+                  onChangeDrawTool({ ...drawTool, active: false });
+                }
+              }}
+              className={`flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium transition cursor-pointer ${
+                active
+                  ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                  : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+
+        <div className="my-1 h-px w-8 bg-[var(--border)]" />
+
+        <button
+          onClick={onOpenLogoMaker}
+          className="flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)] transition cursor-pointer"
+        >
+          <Hexagon className="h-4 w-4" />
+          <span>Logos</span>
+        </button>
+      </div>
+
+      {/* Expandable Drawer */}
+      {activeTab && (
+        <div className="flex h-full w-72 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-[var(--fg)]">
+              {activeTab}
+            </span>
+            <button
+              onClick={() => {
+                onTabChange(null);
+                if (drawTool.active) onChangeDrawTool({ ...drawTool, active: false });
+              }}
+              className="text-[11px] text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+            >
+              Hide
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+            {/* TEMPLATES */}
+            {activeTab === "templates" && (
+              <>
+                <div className="flex flex-wrap gap-1">
+                  {["all", "team", "presentation", "social", "marketing", "document"].map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setTplFilter(cat)}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium capitalize cursor-pointer ${
+                        tplFilter === cat
+                          ? "bg-[var(--fg)] text-[var(--surface)]"
+                          : "bg-[var(--surface-2)] text-[var(--muted)]"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {allTemplates.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      onClick={() =>
+                        onApplyTemplate(instantiateTemplate(tpl), tpl.width, tpl.height)
+                      }
+                      className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-left transition hover:border-[var(--accent)] cursor-pointer"
+                    >
+                      <div className="flex h-24 w-full items-center justify-center bg-[var(--stage)] p-1.5">
+                        {tpl.pages[0] && (
+                          <PagePreview
+                            page={tpl.pages[0]}
+                            width={tpl.width}
+                            height={tpl.height}
+                            maxWidth={110}
+                            maxHeight={82}
+                            className="rounded shadow-xs"
+                          />
+                        )}
+                      </div>
+                      <div className="p-2">
+                        <div className="truncate text-[11px] font-semibold text-[var(--fg)]">
+                          {tpl.title}
+                        </div>
+                        <div className="text-[10px] text-[var(--muted)]">
+                          {tpl.pages.length > 1 ? `${tpl.pages.length} pages` : `${tpl.width}×${tpl.height}`}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {page.elements.length > 0 && (
+                  <button
+                    onClick={onSaveAsTeamTemplate}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-2)] py-2 text-xs font-medium text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                  >
+                    <BookmarkPlus className="h-3.5 w-3.5" /> Save Design as Template
+                  </button>
+                )}
+              </>
+            )}
+
+            {/* ELEMENTS */}
+            {activeTab === "elements" && (
+              <>
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">Shapes & Lines</div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {SHAPE_LIST.map((s) => (
+                      <button
+                        key={s.kind}
+                        onClick={() => addShape(s.kind)}
+                        className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-2.5 text-[11px] font-medium text-[var(--fg)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] transition cursor-pointer"
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">Charts & Tables</div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(["bar", "line", "pie", "donut"] as const).map((ck) => (
+                      <button
+                        key={ck}
+                        onClick={() => addChart(ck)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-2 text-xs font-medium capitalize text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                      >
+                        <BarChart3 className="h-3.5 w-3.5 text-[var(--accent)]" /> {ck}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={addTable}
+                    className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-2 text-xs font-medium text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                  >
+                    <TableIcon className="h-3.5 w-3.5 text-[var(--accent)]" /> Insert Editable Table
+                  </button>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">QR Code Generator</div>
+                  <div className="flex gap-1.5">
+                    <input
+                      value={qrInput}
+                      onChange={(e) => setQrInput(e.target.value)}
+                      placeholder="URL or text…"
+                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-xs text-[var(--fg)] outline-none"
+                    />
+                    <button
+                      onClick={addQr}
+                      className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 text-xs font-semibold text-[var(--accent-fg)] cursor-pointer"
+                    >
+                      <QrCode className="h-3.5 w-3.5" /> Add
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">Vector Icons</div>
+                  <div className="relative mb-2">
+                    <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--muted)]" />
+                    <input
+                      value={iconQuery}
+                      onChange={(e) => setIconQuery(e.target.value)}
+                      placeholder="Search icons (rocket, leaf, tech…)"
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-8 pr-2.5 text-xs text-[var(--fg)] outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {filteredIcons.map((ic) => (
+                      <button
+                        key={ic.id}
+                        onClick={() => addIcon(ic.id, ic.label)}
+                        title={ic.label}
+                        className="flex flex-col items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2.5 text-[var(--fg)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition cursor-pointer"
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          {ic.paths.map((d, idx) => (
+                            <path key={idx} d={d} />
+                          ))}
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* TEXT */}
+            {activeTab === "text" && (
+              <>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => addText("heading")}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-3 text-left text-lg font-extrabold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                  >
+                    Add a heading
+                  </button>
+                  <button
+                    onClick={() => addText("subheading")}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-left text-sm font-semibold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                  >
+                    Add a subheading
+                  </button>
+                  <button
+                    onClick={() => addText("body")}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2 text-left text-xs text-[var(--muted)] hover:border-[var(--accent)] cursor-pointer"
+                  >
+                    Add a little bit of body text
+                  </button>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">Curated Font Pairings</div>
+                  <div className="space-y-2">
+                    {FONT_PAIRINGS.map((pair) => (
+                      <button
+                        key={pair.name}
+                        onClick={() => {
+                          addText("heading", pair.heading);
+                          addText("body", pair.body);
+                        }}
+                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-left hover:border-[var(--accent)] cursor-pointer"
+                      >
+                        <div
+                          className="text-base font-bold text-[var(--fg)]"
+                          style={{ fontFamily: `"${pair.heading}", sans-serif` }}
+                        >
+                          {pair.name}
+                        </div>
+                        <div
+                          className="mt-0.5 text-xs text-[var(--muted)]"
+                          style={{ fontFamily: `"${pair.body}", sans-serif` }}
+                        >
+                          {pair.heading} + {pair.body}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* UPLOADS */}
+            {activeTab === "uploads" && (
+              <>
+                <div className="space-y-2">
+                  <button
