@@ -17,3 +17,22 @@
 - **Sharing & Collaboration:** Role-based sharing (`view`, `comment`, `edit`, `template`), pinned `(x, y)` comments with replies, and Version History checkpoints.
 
 ## Local Development
+
+```bash
+npm install
+npm run dev
+```
+
+For full Cloudflare Workers + Durable Object local preview:
+
+```bash
+npm run preview
+```
+
+## Deploy to Cloudflare Workers
+
+```bash
+npm run deploy
+```
+
+Data and uploaded media live in the SQLite-backed Durable Object `SlateDB`. Schema is initialized automatically on first request.
