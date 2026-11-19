@@ -466,3 +466,237 @@ function renderChartElement(ctx: CanvasRenderingContext2D, el: ChartElement) {
   const chartX = 16;
   const chartY = titleOffset + 8;
   const chartW = Math.max(40, el.width - 32);
+  const chartH = Math.max(40, el.height - titleOffset - 42);
+
+  if (el.chartKind === "pie" || el.chartKind === "donut") {
+    const total = data.reduce((s, d) => s + Math.max(0, d.value), 0) || 1;
+    const radius = Math.min(chartW, chartH) * 0.44;
+    const cx = el.width * 0.42;
+    const cy = chartY + chartH / 2;
+    let start = -Math.PI / 2;
+    data.forEach((d, idx) => {
+      const slice = (Math.max(0, d.value) / total) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, radius, start, start + slice);
+      ctx.closePath();
+      ctx.fillStyle = d.color || palette[idx % palette.length];
+      ctx.fill();
+      start += slice;
+    });
+    if (el.chartKind === "donut") {
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.52, 0, Math.PI * 2);
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fill();
+    }
+    // Legend
+    const lx = cx + radius + 24;
+    data.forEach((d, idx) => {
+      const ly = chartY + 12 + idx * 28;
+      ctx.fillStyle = d.color || palette[idx % palette.length];
+      ctx.fillRect(lx, ly, 14, 14);
+      ctx.fillStyle = el.textColor;
+      ctx.font = `500 15px "Inter", sans-serif`;
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.fillText(`${d.label} (${d.value})`, lx + 22, ly - 1);
+    });
+    return;
+  }
+
+  if (el.chartKind === "line") {
+    ctx.strokeStyle = el.accentColor;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    data.forEach((d, idx) => {
+      const px = chartX + (idx / Math.max(1, data.length - 1)) * chartW;
+      const py = chartY + chartH - (d.value / maxVal) * chartH;
+      if (idx === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+
+    data.forEach((d, idx) => {
+      const px = chartX + (idx / Math.max(1, data.length - 1)) * chartW;
+      const py = chartY + chartH - (d.value / maxVal) * chartH;
+      ctx.fillStyle = el.accentColor;
+      ctx.beginPath();
+      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = el.textColor;
+      ctx.font = `500 14px "Inter", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText(d.label, px, chartY + chartH + 8);
+    });
+    return;
+  }
+
+  // Bar chart
+  const gap = 16;
+  const barW = Math.max(14, (chartW - gap * (data.length - 1)) / data.length);
+  data.forEach((d, idx) => {
+    const bh = (d.value / maxVal) * chartH;
+    const bx = chartX + idx * (barW + gap);
+    const by = chartY + chartH - bh;
+    ctx.fillStyle = d.color || el.accentColor || palette[idx % palette.length];
+    drawRoundedRect(ctx, bx, by, barW, bh, 8);
+    ctx.fill();
+    ctx.fillStyle = el.textColor;
+    ctx.font = `600 14px "Inter", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(d.label, bx + barW / 2, chartY + chartH + 8);
+    if (el.showValues) {
+      ctx.textBaseline = "bottom";
+      ctx.fillText(String(d.value), bx + barW / 2, by - 4);
+    }
+  });
+}
+
+async function renderQrElement(ctx: CanvasRenderingContext2D, el: QrCodeElement) {
+  try {
+    const dataUrl = await QRCode.toDataURL(el.value || "https://mworld-slate.laflabs-tech.workers.dev", {
+      width: Math.max(128, Math.round(Math.max(el.width, el.height))),
+      margin: 1,
+      color: { dark: el.fgColor || "#0F172A", light: el.bgColor || "#FFFFFF" },
+    });
+    const img = await loadImage(dataUrl);
+    ctx.drawImage(img, 0, 0, el.width, el.height);
+  } catch {
+    // ignore
+  }
+}
+
+export async function renderPageToCanvas(
+  page: DesignPage,
+  width: number,
+  height: number,
+  options?: { scale?: number; transparentBg?: boolean },
+): Promise<HTMLCanvasElement> {
+  const scale = options?.scale ?? 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas context unavailable");
+
+  ctx.scale(scale, scale);
+
+  // Page background
+  if (!options?.transparentBg) {
+    if (page.backgroundGradientTo) {
+      ctx.fillStyle = makeLinearGradient(
+        ctx,
+        width,
+        height,
+        page.background,
+        page.backgroundGradientTo,
+        page.backgroundGradientAngle ?? 135,
+      );
+    } else {
+      ctx.fillStyle = page.background || "#FFFFFF";
+    }
+    ctx.fillRect(0, 0, width, height);
+
+    if (page.backgroundImage) {
+      try {
+        const bgImg = await loadImage(page.backgroundImage);
+        const ir = bgImg.naturalWidth / Math.max(1, bgImg.naturalHeight);
+        const cr = width / height;
+        let dw = width;
+        let dh = height;
+        let dx = 0;
+        let dy = 0;
+        if (ir > cr) {
+          dw = height * ir;
+          dx = (width - dw) / 2;
+        } else {
+          dh = width / ir;
+          dy = (height - dh) / 2;
+        }
+        ctx.drawImage(bgImg, dx, dy, dw, dh);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  for (const el of page.elements) {
+    if (el.hidden) continue;
+    ctx.save();
+    ctx.globalAlpha = el.opacity ?? 1;
+    ctx.translate(el.x + el.width / 2, el.y + el.height / 2);
+    if (el.rotation) ctx.rotate((el.rotation * Math.PI) / 180);
+    if (el.flipX || el.flipY) ctx.scale(el.flipX ? -1 : 1, el.flipY ? -1 : 1);
+    ctx.translate(-el.width / 2, -el.height / 2);
+
+    switch (el.type) {
+      case "text":
+        renderTextElement(ctx, el);
+        break;
+      case "shape":
+        renderShapeElement(ctx, el);
+        break;
+      case "image":
+        await renderImageElement(ctx, el);
+        break;
+      case "icon":
+        renderIconElement(ctx, el);
+        break;
+      case "draw":
+        renderDrawElement(ctx, el);
+        break;
+      case "table":
+        renderTableElement(ctx, el);
+        break;
+      case "chart":
+        renderChartElement(ctx, el);
+        break;
+      case "qrcode":
+        await renderQrElement(ctx, el);
+        break;
+    }
+    ctx.restore();
+  }
+
+  return canvas;
+}
+
+export async function generateThumbnail(
+  page: DesignPage,
+  width: number,
+  height: number,
+): Promise<string> {
+  const maxThumb = 420;
+  const scale = Math.min(0.45, maxThumb / Math.max(width, height));
+  const canvas = await renderPageToCanvas(page, width, height, { scale });
+  return canvas.toDataURL("image/jpeg", 0.72);
+}
+
+function triggerDownload(url: string, filename: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+}
+
+export async function exportPageAsImage(
+  page: DesignPage,
+  width: number,
+  height: number,
+  format: "png" | "jpeg",
+  filename: string,
+  options?: { scale?: number; transparentBg?: boolean; quality?: number },
+): Promise<void> {
+  const canvas = await renderPageToCanvas(page, width, height, {
+    scale: options?.scale ?? 2,
+    transparentBg: format === "png" ? options?.transparentBg : false,
+  });
+  const mime = format === "png" ? "image/png" : "image/jpeg";
+  const url = canvas.toDataURL(mime, options?.quality ?? 0.92);
+  triggerDownload(url, `${filename}.${format === "jpeg" ? "jpg" : "png"}`);
+}
+
+function escapeXml(s: string): string {
