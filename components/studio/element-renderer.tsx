@@ -268,3 +268,272 @@ function ChartView({ el }: { el: ChartElement }) {
         )}
         {el.chartKind === "donut" && <circle cx={cx} cy={cy} r={r * 0.54} fill="#FFFFFF" />}
         {data.map((d, idx) => (
+          <g key={idx} transform={`translate(${cx + r + 24}, ${titleH + 18 + idx * 30})`}>
+            <rect width={14} height={14} rx={3} fill={d.color || palette[idx % palette.length]} />
+            <text x={22} y={12} fill={el.textColor} fontFamily="Inter, sans-serif" fontSize={16} fontWeight={500}>
+              {d.label} ({d.value})
+            </text>
+          </g>
+        ))}
+      </svg>
+    );
+  }
+
+  if (el.chartKind === "line") {
+    const pts = data.map((d, idx) => ({
+      x: 24 + (idx / Math.max(1, data.length - 1)) * (chartW - 16),
+      y: titleH + 12 + chartH - (d.value / maxVal) * chartH,
+      label: d.label,
+      value: d.value,
+    }));
+    const poly = pts.map((p) => `${p.x},${p.y}`).join(" ");
+    return (
+      <svg width="100%" height="100%" viewBox={`0 0 ${el.width} ${el.height}`} className="block">
+        {el.title && (
+          <text x={8} y={26} fill={el.textColor} fontFamily="Plus Jakarta Sans, sans-serif" fontSize={22} fontWeight={700}>
+            {el.title}
+          </text>
+        )}
+        <polyline points={poly} fill="none" stroke={el.accentColor} strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" />
+        {pts.map((p, idx) => (
+          <g key={idx}>
+            <circle cx={p.x} cy={p.y} r={6} fill={el.accentColor} />
+            <text x={p.x} y={titleH + chartH + 34} textAnchor="middle" fill={el.textColor} fontSize={14} fontFamily="Inter, sans-serif">
+              {p.label}
+            </text>
+            {el.showValues && (
+              <text x={p.x} y={p.y - 12} textAnchor="middle" fill={el.textColor} fontSize={14} fontWeight={600} fontFamily="Inter, sans-serif">
+                {p.value}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+    );
+  }
+
+  const gap = 16;
+  const barW = Math.max(16, (chartW - gap * (data.length - 1)) / data.length);
+  return (
+    <svg width="100%" height="100%" viewBox={`0 0 ${el.width} ${el.height}`} className="block">
+      {el.title && (
+        <text x={8} y={26} fill={el.textColor} fontFamily="Plus Jakarta Sans, sans-serif" fontSize={22} fontWeight={700}>
+          {el.title}
+        </text>
+      )}
+      {data.map((d, idx) => {
+        const bh = Math.max(6, (d.value / maxVal) * chartH);
+        const bx = 16 + idx * (barW + gap);
+        const by = titleH + 12 + chartH - bh;
+        return (
+          <g key={idx}>
+            <rect x={bx} y={by} width={barW} height={bh} rx={8} fill={d.color || el.accentColor || palette[idx % palette.length]} />
+            <text x={bx + barW / 2} y={titleH + chartH + 34} textAnchor="middle" fill={el.textColor} fontSize={14} fontWeight={500} fontFamily="Inter, sans-serif">
+              {d.label}
+            </text>
+            {el.showValues && (
+              <text x={bx + barW / 2} y={by - 8} textAnchor="middle" fill={el.textColor} fontSize={14} fontWeight={700} fontFamily="Inter, sans-serif">
+                {d.value}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function DrawView({ el }: { el: DrawElement }) {
+  if (el.points.length < 2) return null;
+  const d = el.points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width="100%" height="100%" viewBox={`0 0 ${Math.max(1, el.width)} ${Math.max(1, el.height)}`} className="block overflow-visible">
+      <path
+        d={d}
+        fill="none"
+        stroke={el.color}
+        strokeWidth={el.strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={el.brush === "highlighter" ? 0.42 : 1}
+      />
+    </svg>
+  );
+}
+
+function IconView({ el }: { el: IconElement }) {
+  const icon = getVectorIcon(el.iconId);
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 24 24"
+      fill={el.fillColor && el.fillColor !== "transparent" ? el.fillColor : "none"}
+      stroke={el.color}
+      strokeWidth={el.strokeWidth || 2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="block"
+    >
+      {icon.paths.map((d, idx) => (
+        <path key={idx} d={d} />
+      ))}
+    </svg>
+  );
+}
+
+function CurvedTextView({ el }: { el: TextElement }) {
+  const curve = el.curve ?? 0;
+  const pathId = `curve_${el.id}`;
+  const midY = el.height / 2;
+  const ctrlY = midY - (curve / 100) * (el.height * 0.9);
+  return (
+    <svg width="100%" height="100%" viewBox={`0 0 ${el.width} ${el.height}`} className="block overflow-visible">
+      <defs>
+        <path id={pathId} d={`M 8 ${midY} Q ${el.width / 2} ${ctrlY} ${el.width - 8} ${midY}`} />
+      </defs>
+      <text
+        fill={el.color}
+        fontFamily={`"${el.fontFamily}", sans-serif`}
+        fontSize={el.fontSize}
+        fontWeight={el.fontWeight}
+        fontStyle={el.italic ? "italic" : "normal"}
+        letterSpacing={el.letterSpacing || 0}
+      >
+        <textPath href={`#${pathId}`} startOffset="50%" textAnchor="middle">
+          {el.text}
+        </textPath>
+      </text>
+    </svg>
+  );
+}
+
+export function ElementRenderer({
+  element,
+  editing,
+  onChangeText,
+  onEndEdit,
+  onChangeTableCell,
+}: {
+  element: CanvasElement;
+  editing?: boolean;
+  onChangeText?: (text: string) => void;
+  onEndEdit?: () => void;
+  onChangeTableCell?: (row: number, col: number, value: string) => void;
+}) {
+  if (element.type === "shape") return <>{shapeClipOrSvg(element)}</>;
+  if (element.type === "image") return <ImageMaskWrapper el={element} />;
+  if (element.type === "icon") return <IconView el={element} />;
+  if (element.type === "draw") return <DrawView el={element} />;
+  if (element.type === "chart") return <ChartView el={element} />;
+  if (element.type === "qrcode") return <QrView el={element} />;
+
+  if (element.type === "table") {
+    const tbl = element as TableElement;
+    const padY = Math.max(6, Math.round(tbl.fontSize * 0.35));
+    const padX = Math.max(10, Math.round(tbl.fontSize * 0.6));
+    return (
+      <div className="h-full w-full overflow-hidden">
+        <table
+          className="h-full w-full border-collapse table-fixed"
+          style={{
+            fontFamily: `"${tbl.fontFamily}", sans-serif`,
+            fontSize: `${tbl.fontSize}px`,
+            lineHeight: 1.3,
+          }}
+        >
+          <tbody>
+            {tbl.rows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td
+                    key={ci}
+                    style={{
+                      backgroundColor: ri === 0 ? tbl.headerBg : tbl.cellBg,
+                      color: ri === 0 ? tbl.headerColor : tbl.cellColor,
+                      border: `1px solid ${tbl.borderColor}`,
+                      fontWeight: ri === 0 ? 600 : 400,
+                      padding: `${padY}px ${padX}px`,
+                      verticalAlign: "middle",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {editing && onChangeTableCell ? (
+                      <input
+                        value={cell}
+                        onChange={(e) => onChangeTableCell(ri, ci, e.target.value)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="w-full bg-transparent outline-none"
+                        style={{ color: "inherit", fontWeight: "inherit", fontSize: "inherit" }}
+                      />
+                    ) : (
+                      <span>{cell}</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // Text element
+  const t = element as TextElement;
+  if (t.curve && Math.abs(t.curve) > 2 && !editing) {
+    return <CurvedTextView el={t} />;
+  }
+
+  const textStyle: React.CSSProperties = {
+    fontFamily: `"${t.fontFamily}", sans-serif`,
+    fontSize: `${t.fontSize}px`,
+    fontWeight: t.fontWeight,
+    fontStyle: t.italic ? "italic" : "normal",
+    textDecoration: [t.underline ? "underline" : "", t.strikethrough ? "line-through" : ""]
+      .filter(Boolean)
+      .join(" ") || "none",
+    color: t.color,
+    textAlign: t.align,
+    lineHeight: t.lineHeight || 1.2,
+    letterSpacing: `${t.letterSpacing || 0}px`,
+    textTransform: t.textTransform || "none",
+    backgroundColor: t.backgroundColor && t.backgroundColor !== "transparent" ? t.backgroundColor : undefined,
+    padding: t.backgroundColor && t.backgroundColor !== "transparent" ? `${t.backgroundPadding ?? 10}px` : undefined,
+    borderRadius: t.backgroundColor && t.backgroundColor !== "transparent" ? `${t.backgroundRadius ?? 10}px` : undefined,
+    textShadow:
+      t.shadowColor && t.shadowBlur
+        ? `${t.shadowOffsetX ?? 0}px ${t.shadowOffsetY ?? 4}px ${t.shadowBlur}px ${t.shadowColor}`
+        : undefined,
+    WebkitTextStroke:
+      t.strokeColor && t.strokeWidth ? `${t.strokeWidth}px ${t.strokeColor}` : undefined,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  };
+
+  if (editing && onChangeText) {
+    return (
+      <textarea
+        autoFocus
+        value={t.text}
+        onChange={(e) => onChangeText(e.target.value)}
+        onBlur={onEndEdit}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Escape") onEndEdit?.();
+        }}
+        className="h-full w-full resize-none bg-transparent outline-none"
+        style={textStyle}
+      />
+    );
+  }
+
+  return (
+    <div className="h-full w-full select-none" style={textStyle}>
+      {t.text}
+    </div>
+  );
+}
