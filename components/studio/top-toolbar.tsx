@@ -546,3 +546,276 @@ export function TopToolbar({
                   onClick={onOpenPhotoTab}
                   className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent-fg)] cursor-pointer"
                 >
+                  <SlidersHorizontal className="h-3.5 w-3.5" /> Edit Photo / Filters / BG
+                </button>
+                <button
+                  onClick={() =>
+                    onUpdateElement(im.id, { fit: im.fit === "cover" ? "contain" : "cover" }, true)
+                  }
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 cursor-pointer"
+                >
+                  Fit: {im.fit}
+                </button>
+                <label className="inline-flex items-center gap-1">
+                  Radius
+                  <input
+                    type="range"
+                    min={0}
+                    max={120}
+                    value={im.borderRadius ?? 0}
+                    onChange={(e) => onUpdateElement(im.id, { borderRadius: Number(e.target.value) })}
+                    className="w-16 accent-[var(--accent)]"
+                  />
+                </label>
+              </>
+            );
+          })()}
+
+          {/* ICON controls */}
+          {single?.type === "icon" && (() => {
+            const ic = single as IconElement;
+            return (
+              <>
+                <label className="inline-flex items-center gap-1">
+                  Stroke
+                  <input
+                    type="color"
+                    value={ic.color}
+                    onChange={(e) => onUpdateElement(ic.id, { color: e.target.value })}
+                    className="h-6 w-6 cursor-pointer rounded"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1">
+                  Weight
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    step={0.25}
+                    value={ic.strokeWidth}
+                    onChange={(e) => onUpdateElement(ic.id, { strokeWidth: Number(e.target.value) })}
+                    className="w-16 accent-[var(--accent)]"
+                  />
+                </label>
+              </>
+            );
+          })()}
+
+          {/* TABLE controls */}
+          {single?.type === "table" && (() => {
+            const tb = single as TableElement;
+            return (
+              <>
+                <button
+                  onClick={() =>
+                    onUpdateElement(
+                      tb.id,
+                      { rows: [...tb.rows, Array(tb.rows[0]?.length || 3).fill("Cell")] } as Partial<TableElement>,
+                      true,
+                    )
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 cursor-pointer"
+                >
+                  <Plus className="h-3 w-3" /> Row
+                </button>
+                <button
+                  onClick={() =>
+                    onUpdateElement(
+                      tb.id,
+                      { rows: tb.rows.map((r, i) => [...r, i === 0 ? "Header" : "Cell"]) } as Partial<TableElement>,
+                      true,
+                    )
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 cursor-pointer"
+                >
+                  <Plus className="h-3 w-3" /> Column
+                </button>
+                <label className="inline-flex items-center gap-1">
+                  Header
+                  <input
+                    type="color"
+                    value={tb.headerBg}
+                    onChange={(e) => onUpdateElement(tb.id, { headerBg: e.target.value } as Partial<TableElement>)}
+                    className="h-6 w-6 cursor-pointer rounded"
+                  />
+                </label>
+              </>
+            );
+          })()}
+
+          {/* CHART controls */}
+          {single?.type === "chart" && (() => {
+            const ch = single as ChartElement;
+            return (
+              <>
+                <select
+                  value={ch.chartKind}
+                  onChange={(e) =>
+                    onUpdateElement(ch.id, { chartKind: e.target.value as ChartElement["chartKind"] } as Partial<ChartElement>, true)
+                  }
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1"
+                >
+                  <option value="bar">Bar Chart</option>
+                  <option value="line">Line Chart</option>
+                  <option value="pie">Pie Chart</option>
+                  <option value="donut">Donut Chart</option>
+                </select>
+                <input
+                  value={ch.title || ""}
+                  onChange={(e) => onUpdateElement(ch.id, { title: e.target.value } as Partial<ChartElement>)}
+                  placeholder="Chart title"
+                  className="w-36 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1"
+                />
+                <input
+                  type="color"
+                  value={ch.accentColor}
+                  onChange={(e) => onUpdateElement(ch.id, { accentColor: e.target.value } as Partial<ChartElement>)}
+                  className="h-6 w-6 cursor-pointer rounded"
+                />
+                <button
+                  onClick={() =>
+                    onUpdateElement(
+                      ch.id,
+                      {
+                        data: [
+                          ...ch.data,
+                          { label: `Item ${ch.data.length + 1}`, value: Math.round(30 + Math.random() * 70) },
+                        ],
+                      } as Partial<ChartElement>,
+                      true,
+                    )
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 cursor-pointer"
+                >
+                  <Plus className="h-3 w-3" /> Data Point
+                </button>
+              </>
+            );
+          })()}
+
+          {/* QR CODE controls */}
+          {single?.type === "qrcode" && (() => {
+            const qr = single as QrCodeElement;
+            return (
+              <>
+                <input
+                  value={qr.value}
+                  onChange={(e) => onUpdateElement(qr.id, { value: e.target.value } as Partial<QrCodeElement>)}
+                  placeholder="QR URL or text"
+                  className="w-56 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1"
+                />
+                <input
+                  type="color"
+                  value={qr.fgColor}
+                  onChange={(e) => onUpdateElement(qr.id, { fgColor: e.target.value } as Partial<QrCodeElement>)}
+                  className="h-6 w-6 cursor-pointer rounded"
+                />
+              </>
+            );
+          })()}
+
+          {/* Common selection controls */}
+          {selectedElements.length > 0 && (
+            <div className="ml-auto flex items-center gap-1.5">
+              {single && (
+                <>
+                  <label className="inline-flex items-center gap-1 text-[11px] text-[var(--muted)]" title="Opacity">
+                    Opacity
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={1}
+                      step={0.05}
+                      value={single.opacity ?? 1}
+                      onChange={(e) => onUpdateElement(single.id, { opacity: Number(e.target.value) })}
+                      className="w-14 accent-[var(--accent)]"
+                    />
+                  </label>
+                  <button
+                    onClick={() => onUpdateElement(single.id, { flipX: !single.flipX }, true)}
+                    title="Flip Horizontal"
+                    className="rounded p-1.5 hover:bg-[var(--surface-3)] cursor-pointer"
+                  >
+                    <FlipHorizontal2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => onUpdateElement(single.id, { flipY: !single.flipY }, true)}
+                    title="Flip Vertical"
+                    className="rounded p-1.5 hover:bg-[var(--surface-3)] cursor-pointer"
+                  >
+                    <FlipVertical2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={onCopyStyle}
+                    title="Copy Style"
+                    className="rounded p-1.5 hover:bg-[var(--surface-3)] cursor-pointer"
+                  >
+                    <Paintbrush className="h-3.5 w-3.5" />
+                  </button>
+                  {hasCopiedStyle && (
+                    <button
+                      onClick={onPasteStyle}
+                      className="rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--accent)] cursor-pointer"
+                    >
+                      Paste Style
+                    </button>
+                  )}
+                </>
+              )}
+
+              <button
+                onClick={() => onAlign("centerX")}
+                title="Center Horizontally"
+                className="rounded p-1.5 hover:bg-[var(--surface-3)] cursor-pointer"
+              >
+                <AlignHorizontalJustifyCenter className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => onAlign("centerY")}
+                title="Center Vertically"
+                className="rounded p-1.5 hover:bg-[var(--surface-3)] cursor-pointer"
+              >
+                <AlignVerticalJustifyCenter className="h-3.5 w-3.5" />
+              </button>
+
+              {(selectedElements.length > 1 || isGrouped) && (
+                <button
+                  onClick={onGroupToggle}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] font-medium cursor-pointer"
+                >
+                  {isGrouped ? <Ungroup className="h-3.5 w-3.5" /> : <Group className="h-3.5 w-3.5" />}
+                  {isGrouped ? "Ungroup" : "Group"}
+                </button>
+              )}
+
+              {single && (
+                <button
+                  onClick={() => onUpdateElement(single.id, { locked: !single.locked }, true)}
+                  title={single.locked ? "Unlock" : "Lock"}
+                  className="rounded p-1.5 hover:bg-[var(--surface-3)] cursor-pointer"
+                >
+                  {single.locked ? <Lock className="h-3.5 w-3.5 text-amber-500" /> : <Unlock className="h-3.5 w-3.5" />}
+                </button>
+              )}
+
+              <button
+                onClick={onDuplicateSelected}
+                title="Duplicate (⌘D)"
+                className="rounded p-1.5 hover:bg-[var(--surface-3)] cursor-pointer"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={onDeleteSelected}
+                title="Delete"
+                className="rounded p-1.5 text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
