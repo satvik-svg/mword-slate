@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mworld-slate",
+  "main": "cloudflare-worker.ts",
+  "compatibility_date": "2026-11-12",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "upload_source_maps": true,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SLATE_DB",
+        "class_name": "SlateDB"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SlateDB"]
+    }
+  ],
+  "vars": {
+    "MAUTH_ENABLED": "true",
+    "MAUTH_API_URL": "https://api.mauth.mworld.cloud",
+    "MAUTH_VERIFY_URL": "https://api.mauth.mworld.cloud/mAuthAG/verifyToken",
+    "APP_ORIGIN": "https://mworld-slate.laflabs-tech.workers.dev"
+  }
+}
