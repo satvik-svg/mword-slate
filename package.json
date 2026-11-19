@@ -1,0 +1,41 @@
+{
+  "name": "mworld-slate",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack --port 3300",
+    "build": "next build --webpack",
+    "start": "next start --port 3300",
+    "preview": "opennextjs-cloudflare build && wrangler dev",
+    "deploy": "opennextjs-cloudflare build && wrangler deploy",
+    "cf:build": "opennextjs-cloudflare build",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "npx tsx --test lib/slate.test.ts"
+  },
+  "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.16",
+    "jspdf": "^2.5.2",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.469.0",
+    "next": "16.4.5",
+    "pptxgenjs": "^3.12.0",
+    "qrcode": "^1.5.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261112.1",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wrangler": "^4.160.1"
+  }
+}
