@@ -217,3 +217,221 @@ export function applyStyleToPage(page: DesignPage, opts: ApplyStyleOptions): Des
   const pageWidth = opts.pageWidth ?? 1920;
   const pageHeight = opts.pageHeight ?? 1080;
 
+  if (!applyColors && !applyFonts) return page;
+
+  const roles = applyColors ? derivePaletteRoles(opts.colors!, variant) : null;
+
+  // Determine target page background (never destroy a photo/artwork backgroundImage)
+  let nextBg = page.background;
+  let nextGradTo = page.backgroundGradientTo;
+  const hasBgImage = !!page.backgroundImage;
+
+  if (roles && !hasBgImage && page.background !== "transparent") {
+    const originallyLight = isLightColor(page.background);
+    if (variant === 0) {
+      nextBg = originallyLight ? roles.surface : roles.ink;
+      nextGradTo = page.backgroundGradientTo
+        ? originallyLight
+          ? roles.card
+          : mixHex(roles.ink, roles.accent, 0.22)
+        : undefined;
+    } else if (variant === 1) {
+      nextBg = originallyLight ? roles.card : mixHex(roles.ink, roles.accent, 0.18);
+      nextGradTo = page.backgroundGradientTo ? roles.surface : undefined;
+    } else {
+      // Variant 2: flip polarity for a high-contrast dark/light exploration
+      nextBg = originallyLight ? roles.ink : roles.surface;
+      nextGradTo = page.backgroundGradientTo
+        ? originallyLight
+          ? mixHex(roles.ink, roles.accent, 0.28)
+          : roles.card
+        : undefined;
+    }
+  }
+
+  const pageIsDark = roles ? !isLightColor(nextBg) : !isLightColor(page.background);
+  const styledElements: CanvasElement[] = [];
+  let accentCounter = 0;
+
+  for (let i = 0; i < page.elements.length; i++) {
+    const el = page.elements[i];
+
+    if (el.type === "shape") {
+      if (!roles) {
+        styledElements.push(el);
+        continue;
+      }
+
+      const hasVisibleFill =
+        !!el.fill && el.fill !== "transparent" && el.fill !== "none";
+      const hasVisibleStroke =
+        !!el.stroke && el.stroke !== "transparent" && el.stroke !== "none" && (el.strokeWidth ?? 0) > 0;
+
+      if (el.shape === "line" || el.shape === "arrow") {
+        styledElements.push({
+          ...el,
+          fill: hasVisibleFill ? roles.accent : el.fill,
+          stroke: hasVisibleStroke ? roles.accent : el.stroke,
+        });
+        continue;
+      }
+
+      if (!hasVisibleFill) {
+        styledElements.push({
+          ...el,
+          stroke: hasVisibleStroke
+            ? pageIsDark
+              ? mixHex(roles.surface, roles.accent, 0.35)
+              : mixHex(roles.ink, roles.surface, 0.65)
+            : el.stroke,
+        });
+        continue;
+      }
+
+      const container = isContainerShape(el, i, page.elements, pageWidth, pageHeight);
+      if (container) {
+        const containerFill = hasBgImage
+          ? variant === 2
+            ? roles.darkCard
+            : roles.card
+          : pageIsDark
+            ? roles.darkCard
+            : variant === 1
+              ? roles.surface
+              : roles.card;
+        styledElements.push({
+          ...el,
+          fill: containerFill,
+          gradientTo: el.gradientTo ? mixHex(containerFill, roles.accent, 0.08) : undefined,
+          stroke: hasVisibleStroke
+            ? pageIsDark
+              ? mixHex(roles.surface, roles.ink, 0.72)
+              : mixHex(roles.ink, roles.surface, 0.82)
+            : el.stroke,
+        });
+        continue;
+      }
+
+      // Accent / decorative shape
+      const nextFill = accentCounter % 2 === 0 ? roles.accent : roles.secondary;
+      accentCounter += 1;
+      styledElements.push({
+        ...el,
+        fill: nextFill,
+        gradientTo: el.gradientTo ? roles.secondary : undefined,
+        stroke: hasVisibleStroke ? mixHex(nextFill, roles.ink, 0.2) : el.stroke,
+      });
+      continue;
+    }
+
+    if (el.type === "text") {
+      const patch: Partial<typeof el> = {};
+      if (applyFonts && opts.fonts) {
+        const isHeading = el.fontSize >= 28 || (el.fontSize >= 20 && el.fontWeight >= 600);
+        patch.fontFamily = isHeading ? opts.fonts.heading : opts.fonts.body;
+      }
+      if (roles) {
+        const enclosingFill = findEnclosingShapeFill(el, i, styledElements);
+        if (enclosingFill) {
+          const isSubtle = colorSaturation(el.color) < 0.15 && relativeLuminance(el.color) > 0.25 && relativeLuminance(el.color) < 0.75;
+          const primaryText = pickContrastingText(enclosingFill, roles.ink, "#FFFFFF");
+          patch.color = isSubtle
+            ? mixHex(primaryText, enclosingFill, 0.28)
+            : primaryText;
+        } else if (hasBgImage) {
+          // Directly over a background image: preserve original light/dark polarity so contrast stays intact
+          const wasLightText = isLightColor(el.color);
+          patch.color = wasLightText ? roles.surface : roles.ink;
+        } else {
+          const primaryText = pickContrastingText(nextBg, roles.ink, "#FFFFFF");
+          const wasAccentText = colorSaturation(el.color) >= 0.35;
+          if (wasAccentText && contrastRatio(nextBg, roles.accent) >= 3.2) {
+            patch.color = roles.accent;
+          } else {
+            patch.color = primaryText;
+          }
+        }
+        if (el.backgroundColor && el.backgroundColor !== "transparent") {
+          patch.backgroundColor = roles.accent;
+          patch.color = pickContrastingText(roles.accent, roles.ink, "#FFFFFF");
+        }
+      }
+      styledElements.push({ ...el, ...patch });
+      continue;
+    }
+
+    if (el.type === "icon") {
+      if (!roles) {
+        styledElements.push(el);
+        continue;
+      }
+      const enclosingFill = findEnclosingShapeFill(el, i, styledElements);
+      const backdrop = enclosingFill ?? (hasBgImage ? "#FFFFFF" : nextBg);
+      const iconColor =
+        contrastRatio(backdrop, roles.accent) >= 2.5
+          ? roles.accent
+          : pickContrastingText(backdrop, roles.ink, "#FFFFFF");
+      styledElements.push({ ...el, color: iconColor });
+      continue;
+    }
+
+    if (el.type === "table") {
+      styledElements.push({
+        ...el,
+        ...(applyFonts && opts.fonts ? { fontFamily: opts.fonts.body } : {}),
+        ...(roles
+          ? {
+              headerBg: roles.ink,
+              headerColor: pickContrastingText(roles.ink, roles.ink, "#FFFFFF"),
+              cellBg: pageIsDark ? roles.darkCard : roles.surface,
+              cellColor: pickContrastingText(
+                pageIsDark ? roles.darkCard : roles.surface,
+                roles.ink,
+                "#FFFFFF",
+              ),
+              borderColor: pageIsDark
+                ? mixHex(roles.surface, roles.ink, 0.75)
+                : mixHex(roles.ink, roles.surface, 0.85),
+            }
+          : {}),
+      });
+      continue;
+    }
+
+    if (el.type === "chart") {
+      if (!roles) {
+        styledElements.push(el);
+        continue;
+      }
+      const backdrop = findEnclosingShapeFill(el, i, styledElements) ?? nextBg;
+      styledElements.push({
+        ...el,
+        accentColor: roles.accent,
+        textColor: pickContrastingText(backdrop, roles.ink, "#FFFFFF"),
+      });
+      continue;
+    }
+
+    if (el.type === "qrcode") {
+      if (!roles) {
+        styledElements.push(el);
+        continue;
+      }
+      styledElements.push({
+        ...el,
+        fgColor: roles.ink,
+        bgColor: roles.surface,
+      });
+      continue;
+    }
+
+    styledElements.push(el);
+  }
+
+  return {
+    ...page,
+    background: nextBg,
+    backgroundGradientTo: nextGradTo,
+    elements: styledElements,
+  };
+}
