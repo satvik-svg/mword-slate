@@ -310,3 +310,315 @@ async function loadThemeColors(zip: JSZip): Promise<ThemeColors> {
 
   const themeFile = Object.keys(zip.files).find((n) => /^ppt\/theme\/theme\d+\.xml$/i.test(n));
   if (!themeFile) return defaults;
+  const xml = await zip.file(themeFile)?.async("string");
+  if (!xml) return defaults;
+  const doc = parseXml(xml);
+  const clrScheme = firstDescendant(doc, "clrScheme");
+  if (!clrScheme) return defaults;
+
+  for (const child of clrScheme.children) {
+    const srgb = firstDescendant(child, "srgbClr");
+    const sys = firstDescendant(child, "sysClr");
+    const val = getAttr(srgb, "val") ?? getAttr(sys, "lastClr");
+    if (val && /^[0-9a-fA-F]{6}$/.test(val)) {
+      defaults[child.localName] = `#${val.toUpperCase()}`;
+    }
+  }
+  defaults.tx1 = defaults.dk1;
+  defaults.tx2 = defaults.dk2;
+  defaults.bg1 = defaults.lt1;
+  defaults.bg2 = defaults.lt2;
+  return defaults;
+}
+
+function mimeFromExt(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "svg") return "image/svg+xml";
+  return "image/png";
+}
+
+async function compressDataUrlInBrowser(dataUrl: string, mime: string): Promise<string> {
+  if (typeof document === "undefined" || typeof Image === "undefined") return dataUrl;
+  // Only compress large raster images so Durable Object SQLite stays fast & well under 2 MB
+  if (mime === "image/svg+xml" || mime === "image/gif" || dataUrl.length < 220_000) {
+    return dataUrl;
+  }
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = dataUrl;
+    });
+    const maxDim = 1600;
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+    const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+    const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+    ctx.drawImage(img, 0, 0, w, h);
+    const outMime = mime === "image/jpeg" ? "image/jpeg" : "image/webp";
+    const compressed = canvas.toDataURL(outMime, 0.82);
+    return compressed.length < dataUrl.length ? compressed : dataUrl;
+  } catch {
+    return dataUrl;
+  }
+}
+
+function normalizeFontFamilyAndWeight(rawFont: string | undefined): {
+  family: string;
+  inferredWeight: number | null;
+} {
+  if (!rawFont || rawFont.startsWith("+")) {
+    return { family: "Inter", inferredWeight: null };
+  }
+  const trimmed = rawFont.trim();
+  const patterns: [RegExp, number][] = [
+    [/\s+(Extra\s*Bold|Ultra\s*Bold|Black|Heavy)$/i, 800],
+    [/\s+Bold$/i, 700],
+    [/\s+(Semi\s*Bold|Demi\s*Bold)$/i, 600],
+    [/\s+Medium$/i, 500],
+    [/\s+(Regular|Normal|Book)$/i, 400],
+    [/\s+(Light|Thin|Extra\s*Light)$/i, 300],
+  ];
+  for (const [re, weight] of patterns) {
+    if (re.test(trimmed)) {
+      return { family: trimmed.replace(re, "").trim() || "Inter", inferredWeight: weight };
+    }
+  }
+  return { family: trimmed, inferredWeight: null };
+}
+
+function mapPresetShape(prst: string): ShapeKind {
+  switch (prst) {
+    case "ellipse":
+    case "oval":
+      return "circle";
+    case "triangle":
+    case "rtTriangle":
+      return "triangle";
+    case "diamond":
+      return "diamond";
+    case "pentagon":
+      return "pentagon";
+    case "hexagon":
+      return "hexagon";
+    case "star4":
+    case "star5":
+    case "star6":
+      return "star";
+    case "rightArrow":
+    case "leftArrow":
+      return "arrow";
+    case "line":
+    case "straightConnector1":
+      return "line";
+    default:
+      return "rect";
+  }
+}
+
+type TransformContext = {
+  // Maps local EMU coords to canvas px
+  mapX: (emuX: number) => number;
+  mapY: (emuY: number) => number;
+  scaleX: number;
+  scaleY: number;
+};
+
+function parseXfrm(node: XmlNode, ctx: TransformContext) {
+  const xfrm = directChild(directChild(node, "spPr"), "xfrm") ?? directChild(node, "xfrm");
+  const off = directChild(xfrm, "off");
+  const ext = directChild(xfrm, "ext");
+  if (!off || !ext) return null;
+  const rawX = Number(getAttr(off, "x") ?? 0) || 0;
+  const rawY = Number(getAttr(off, "y") ?? 0) || 0;
+  const rawCx = Number(getAttr(ext, "cx") ?? 0) || 0;
+  const rawCy = Number(getAttr(ext, "cy") ?? 0) || 0;
+  const rotAttr = Number(getAttr(xfrm, "rot") ?? 0);
+  const rotation = rotAttr ? Math.round(rotAttr / 60000) : 0;
+  const flipX = getAttr(xfrm, "flipH") === "1";
+  const flipY = getAttr(xfrm, "flipV") === "1";
+
+  return {
+    x: Math.round(ctx.mapX(rawX)),
+    y: Math.round(ctx.mapY(rawY)),
+    w: Math.max(1, Math.round(rawCx * ctx.scaleX)),
+    h: Math.max(1, Math.round(rawCy * ctx.scaleY)),
+    rawX,
+    rawY,
+    rawCx,
+    rawCy,
+    rotation,
+    flipX,
+    flipY,
+  };
+}
+
+function getBlipEmbedId(node: XmlNode): string | undefined {
+  const blip = firstDescendant(node, "blip");
+  if (!blip) return undefined;
+  return getAttr(blip, "r:embed") ?? getAttr(blip, "embed") ?? getAttr(blip, `${REL_NS}:embed`);
+}
+
+function isPlaceholderShape(node: XmlNode): boolean {
+  const nv =
+    directChild(node, "nvSpPr") ??
+    directChild(node, "nvPicPr") ??
+    directChild(node, "nvGraphicFramePr");
+  const nvPr = directChild(nv, "nvPr");
+  return !!directChild(nvPr, "ph");
+}
+
+function extractNodeName(node: XmlNode, fallback: string): string {
+  const cNvPr = firstDescendant(node, "cNvPr");
+  return getAttr(cNvPr, "name") || fallback;
+}
+
+function extractGradFill(
+  gradNode: XmlNode | null,
+  themeColors: ThemeColors,
+): { from: string; to?: string; angle: number; opacity: number } | null {
+  if (!gradNode) return null;
+  const stops = allDescendants(gradNode, "gs");
+  if (stops.length === 0) return null;
+  const first = extractColorInfo(stops[0], themeColors);
+  const last = extractColorInfo(stops[stops.length - 1], themeColors);
+  if (!first) return null;
+  const lin = firstDescendant(gradNode, "lin");
+  const angAttr = Number(getAttr(lin, "ang") ?? 0);
+  // PowerPoint lin ang is clockwise from +X in 60000ths of a degree; CSS is clockwise from -Y
+  const angle = lin ? Math.round(((angAttr / 60000) + 90) % 360) : 135;
+  return {
+    from: first.color,
+    to: last && last.color !== first.color ? last.color : undefined,
+    angle,
+    opacity: first.opacity,
+  };
+}
+
+function extractTableElement(
+  gfNode: XmlNode,
+  ctx: TransformContext,
+  ptToPx: number,
+  themeColors: ThemeColors,
+): TableElement | null {
+  const tbl = firstDescendant(gfNode, "tbl");
+  if (!tbl) return null;
+  const box = parseXfrm(gfNode, ctx);
+  if (!box) return null;
+
+  const trs = directChildren(tbl, "tr");
+  if (trs.length === 0) return null;
+
+  const rows: string[][] = [];
+  let headerBg = "#F1F5F9";
+  let headerColor = "#111114";
+  let cellBg = "#FFFFFF";
+  let cellColor = "#111114";
+  let borderColor = "#D4D4D8";
+  let fontSize = Math.round(14 * ptToPx);
+  let fontFamily = "Inter";
+  let totalRowHeightEmu = 0;
+
+  trs.forEach((tr, rowIdx) => {
+    const rowH = Number(getAttr(tr, "h") ?? 0);
+    if (rowH > 0) totalRowHeightEmu += rowH;
+    const tcs = directChildren(tr, "tc");
+    const rowCells: string[] = [];
+    tcs.forEach((tc, colIdx) => {
+      const txBody = directChild(tc, "txBody");
+      const paragraphs = directChildren(txBody, "p");
+      const cellLines: string[] = [];
+      for (const p of paragraphs) {
+        let line = "";
+        for (const r of directChildren(p, "r")) {
+          const rPr = directChild(r, "rPr");
+          if (rPr) {
+            const sz = Number(getAttr(rPr, "sz"));
+            if (sz > 0 && rowIdx === 0 && colIdx === 0) {
+              fontSize = Math.max(12, Math.round((sz / 100) * ptToPx));
+            }
+            const latin = directChild(rPr, "latin");
+            if (latin && rowIdx === 0 && colIdx === 0) {
+              fontFamily = normalizeFontFamilyAndWeight(getAttr(latin, "typeface")).family;
+            }
+            const col = extractColorInfo(directChild(rPr, "solidFill"), themeColors);
+            if (col) {
+              if (rowIdx === 0 && colIdx === 0) headerColor = col.color;
+              else if (rowIdx === 1 && colIdx === 0) cellColor = col.color;
+            }
+          }
+          const t = directChild(r, "t");
+          if (t?.text) line += t.text;
+        }
+        cellLines.push(line);
+      }
+      rowCells.push(cellLines.join("\n").trim());
+
+      const tcPr = directChild(tc, "tcPr");
+      if (tcPr) {
+        const fill = extractColorInfo(directChild(tcPr, "solidFill"), themeColors);
+        if (fill) {
+          if (rowIdx === 0 && colIdx === 0) headerBg = fill.color;
+          else if (rowIdx === 1 && colIdx === 0) cellBg = fill.color;
+        }
+        const lnB = directChild(tcPr, "lnB") ?? directChild(tcPr, "lnL");
+        const borderCol = extractColorInfo(directChild(lnB, "solidFill"), themeColors);
+        if (borderCol && rowIdx === 0 && colIdx === 0) borderColor = borderCol.color;
+      }
+    });
+    rows.push(rowCells);
+  });
+
+  const computedH = Math.max(box.h, Math.round(totalRowHeightEmu * ctx.scaleY));
+  return {
+    id: makeId("el"),
+    type: "table",
+    name: extractNodeName(gfNode, "Table"),
+    x: box.x,
+    y: box.y,
+    width: Math.max(120, box.w),
+    height: Math.max(80, computedH),
+    rotation: box.rotation,
+    opacity: 1,
+    rows,
+    headerBg,
+    headerColor,
+    cellBg,
+    cellColor,
+    borderColor,
+    fontSize: Math.min(48, Math.max(12, fontSize)),
+    fontFamily,
+  };
+}
+
+export async function importPptxBuffer(
+  input: ArrayBuffer | Uint8Array | Blob | File,
+  fileName = "Imported Presentation.pptx",
+): Promise<{
+  title: string;
+  width: number;
+  height: number;
+  pages: DesignPage[];
+}> {
+  const zip = await JSZip.loadAsync(input);
+  const themeColors = await loadThemeColors(zip);
+
+  // Read presentation slide dimensions
+  let slideCx = 12192000; // 16:9 default (13.333 in)
+  let slideCy = 6858000; // 7.5 in
+  const presXml = await zip.file("ppt/presentation.xml")?.async("string");
+  if (presXml) {
+    const doc = parseXml(presXml);
+    const sldSz = firstDescendant(doc, "sldSz");
+    if (sldSz) {
+      const cx = Number(getAttr(sldSz, "cx"));
+      const cy = Number(getAttr(sldSz, "cy"));
+      if (cx > 0 && cy > 0) {
