@@ -700,3 +700,237 @@ export async function exportPageAsImage(
 }
 
 function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function exportPageAsSvg(
+  page: DesignPage,
+  width: number,
+  height: number,
+  filename: string,
+  transparentBg = false,
+): void {
+  const defs: string[] = [];
+  const items: string[] = [];
+
+  if (!transparentBg) {
+    if (page.backgroundGradientTo) {
+      defs.push(
+        `<linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${page.background}"/><stop offset="100%" stop-color="${page.backgroundGradientTo}"/></linearGradient>`,
+      );
+      items.push(`<rect width="${width}" height="${height}" fill="url(#bgGrad)"/>`);
+    } else {
+      items.push(`<rect width="${width}" height="${height}" fill="${page.background || "#FFFFFF"}"/>`);
+    }
+  }
+
+  page.elements.forEach((el, idx) => {
+    if (el.hidden) return;
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    const transform = `translate(${el.x},${el.y}) rotate(${el.rotation || 0},${el.width / 2},${el.height / 2})`;
+
+    if (el.type === "shape") {
+      let fill = el.fill;
+      if (el.gradientTo) {
+        const gid = `sg_${idx}`;
+        defs.push(
+          `<linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${el.fill}"/><stop offset="100%" stop-color="${el.gradientTo}"/></linearGradient>`,
+        );
+        fill = `url(#${gid})`;
+      }
+      const strokeAttr = `stroke="${el.stroke || "none"}" stroke-width="${el.strokeWidth || 0}"`;
+      if (el.shape === "circle") {
+        items.push(
+          `<ellipse cx="${cx}" cy="${cy}" rx="${el.width / 2}" ry="${el.height / 2}" fill="${fill}" ${strokeAttr} opacity="${el.opacity}"/>`,
+        );
+      } else if (el.shape === "line") {
+        items.push(
+          `<line x1="${el.x}" y1="${cy}" x2="${el.x + el.width}" y2="${cy}" stroke="${el.stroke || el.fill}" stroke-width="${Math.max(2, el.strokeWidth)}" opacity="${el.opacity}"/>`,
+        );
+      } else {
+        const rx = el.shape === "pill" ? Math.min(el.width, el.height) / 2 : el.borderRadius ?? 0;
+        items.push(
+          `<rect x="0" y="0" width="${el.width}" height="${el.height}" rx="${rx}" fill="${fill}" ${strokeAttr} opacity="${el.opacity}" transform="${transform}"/>`,
+        );
+      }
+    } else if (el.type === "text") {
+      const anchor = el.align === "center" ? "middle" : el.align === "right" ? "end" : "start";
+      const tx = el.align === "center" ? el.width / 2 : el.align === "right" ? el.width : 0;
+      const lines = el.text.split("\n");
+      const tspans = lines
+        .map(
+          (line, li) =>
+            `<tspan x="${tx}" dy="${li === 0 ? el.fontSize : Math.round(el.fontSize * el.lineHeight)}">${escapeXml(line)}</tspan>`,
+        )
+        .join("");
+      items.push(
+        `<text transform="${transform}" opacity="${el.opacity}" text-anchor="${anchor}" font-family="${escapeXml(el.fontFamily)}, sans-serif" font-size="${el.fontSize}" font-weight="${el.fontWeight}" fill="${el.color}" letter-spacing="${el.letterSpacing || 0}">${tspans}</text>`,
+      );
+    } else if (el.type === "icon") {
+      const icon = getVectorIcon(el.iconId);
+      const sx = el.width / 24;
+      const sy = el.height / 24;
+      items.push(
+        `<g transform="${transform} scale(${sx.toFixed(3)},${sy.toFixed(3)})" fill="none" stroke="${el.color}" stroke-width="${el.strokeWidth || 2}" stroke-linecap="round" stroke-linejoin="round" opacity="${el.opacity}">${icon.paths.map((d) => `<path d="${d}"/>`).join("")}</g>`,
+      );
+    } else if (el.type === "image") {
+      items.push(
+        `<image href="${escapeXml(el.src)}" x="0" y="0" width="${el.width}" height="${el.height}" preserveAspectRatio="xMidYMid slice" opacity="${el.opacity}" transform="${transform}"/>`,
+      );
+    } else if (el.type === "draw" && el.points.length > 1) {
+      const d = el.points
+        .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+        .join(" ");
+      items.push(
+        `<path d="${d}" fill="none" stroke="${el.color}" stroke-width="${el.strokeWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${el.opacity}" transform="${transform}"/>`,
+      );
+    }
+  });
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><defs>${defs.join("")}</defs>${items.join("")}</svg>`;
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  triggerDownload(url, `${filename}.svg`);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function exportDesignAsPdf(
+  pages: DesignPage[],
+  width: number,
+  height: number,
+  filename: string,
+): Promise<void> {
+  const orientation = width >= height ? "landscape" : "portrait";
+  const pdf = new jsPDF({
+    orientation,
+    unit: "px",
+    format: [width, height],
+    hotfixes: ["px_scaling"],
+  });
+
+  for (let i = 0; i < pages.length; i++) {
+    if (i > 0) pdf.addPage([width, height], orientation);
+    const canvas = await renderPageToCanvas(pages[i], width, height, { scale: 1.5 });
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    pdf.addImage(dataUrl, "JPEG", 0, 0, width, height);
+  }
+  pdf.save(`${filename}.pdf`);
+}
+
+function cleanHex(color?: string, fallback = "0F172A"): string {
+  if (!color) return fallback;
+  const m = color.trim().match(/^#([0-9a-fA-F]{6})$/);
+  return m ? m[1].toUpperCase() : fallback;
+}
+
+export async function exportDesignAsPptx(
+  pages: DesignPage[],
+  width: number,
+  height: number,
+  filename: string,
+): Promise<void> {
+  const PptxGenJS = (await import("pptxgenjs")).default;
+  const pptx = new PptxGenJS();
+
+  const slideW = 13.333;
+  const slideH = Math.max(4, +(slideW * (height / Math.max(1, width))).toFixed(3));
+  pptx.defineLayout({ name: "SLATE_CUSTOM", width: slideW, height: slideH });
+  pptx.layout = "SLATE_CUSTOM";
+
+  const pxToInX = (px: number) => (px / width) * slideW;
+  const pxToInY = (px: number) => (px / height) * slideH;
+  const pxToPt = (px: number) => Math.max(8, Math.round(px * (slideH / height) * 72));
+
+  for (const page of pages) {
+    const slide = pptx.addSlide();
+    slide.background = { color: cleanHex(page.background, "FFFFFF") };
+    if (page.notes) slide.addNotes(page.notes);
+
+    for (const el of page.elements) {
+      if (el.hidden) continue;
+      const x = pxToInX(el.x);
+      const y = pxToInY(el.y);
+      const w = Math.max(0.1, pxToInX(el.width));
+      const h = Math.max(0.1, pxToInY(el.height));
+
+      if (el.type === "text") {
+        slide.addText(el.text, {
+          x,
+          y,
+          w,
+          h,
+          fontFace: el.fontFamily,
+          fontSize: pxToPt(el.fontSize),
+          bold: el.fontWeight >= 600,
+          italic: !!el.italic,
+          underline: el.underline ? { style: "sng" } : undefined,
+          color: cleanHex(el.color, "0F172A"),
+          align: el.align,
+          rotate: el.rotation || 0,
+          valign: "top",
+        });
+      } else if (el.type === "shape") {
+        const shapeName =
+          el.shape === "circle"
+            ? pptx.ShapeType.ellipse
+            : el.shape === "triangle"
+              ? pptx.ShapeType.triangle
+              : el.shape === "diamond"
+                ? pptx.ShapeType.diamond
+                : el.shape === "star"
+                  ? pptx.ShapeType.star5
+                  : el.shape === "line"
+                    ? pptx.ShapeType.line
+                    : el.borderRadius && el.borderRadius > 4
+                      ? pptx.ShapeType.roundRect
+                      : pptx.ShapeType.rect;
+        slide.addShape(shapeName, {
+          x,
+          y,
+          w,
+          h,
+          fill:
+            el.fill && el.fill !== "transparent"
+              ? { color: cleanHex(el.fill, "4F46E5"), transparency: Math.round((1 - (el.opacity ?? 1)) * 100) }
+              : undefined,
+          line:
+            el.stroke && el.stroke !== "transparent" && el.strokeWidth > 0
+              ? { color: cleanHex(el.stroke), pt: Math.max(1, el.strokeWidth * 0.5) }
+              : undefined,
+          rotate: el.rotation || 0,
+        });
+      } else if (el.type === "image" && el.src.startsWith("data:")) {
+        slide.addImage({
+          data: el.src,
+          x,
+          y,
+          w,
+          h,
+          rotate: el.rotation || 0,
+        });
+      } else if (el.type === "table") {
+        slide.addTable(
+          el.rows.map((r, ri) =>
+            r.map((cell) => ({
+              text: cell,
+              options: {
+                fill: { color: cleanHex(ri === 0 ? el.headerBg : el.cellBg, "FFFFFF") },
+                color: cleanHex(ri === 0 ? el.headerColor : el.cellColor, "0F172A"),
+                bold: ri === 0,
+                fontSize: Math.max(9, pxToPt(el.fontSize)),
+              },
+            })),
+          ),
+          { x, y, w, h, border: { type: "solid", color: cleanHex(el.borderColor, "CBD5E1"), pt: 1 } },
+        );
+      }
+    }
+  }
+
+  await pptx.writeFile({ fileName: `${filename}.pptx` });
+}
