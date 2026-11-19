@@ -326,3 +326,167 @@ export async function saveBrandKit(biId: string, kit: Partial<BrandKit>): Promis
             values (?, ?, ?, ?, ?, ?)
             on conflict(bi_id) do update set
               name = excluded.name,
+              logos_json = excluded.logos_json,
+              colors_json = excluded.colors_json,
+              fonts_json = excluded.fonts_json,
+              updated_at = excluded.updated_at`,
+      params: [
+        biId,
+        next.name,
+        JSON.stringify(next.logos),
+        JSON.stringify(next.colors),
+        JSON.stringify(next.fonts),
+        next.updatedAt,
+      ],
+    },
+  ]);
+  return next;
+}
+
+export async function listMedia(biId: string): Promise<MediaAsset[]> {
+  const { rows } = await query<{
+    id: string;
+    name: string;
+    mime_type: string;
+    data_url: string;
+    width: number;
+    height: number;
+    size_bytes: number;
+    created_at: number;
+  }>(
+    "select id, name, mime_type, data_url, width, height, size_bytes, created_at from media_assets where bi_id = ? order by created_at desc limit 100",
+    [biId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    mimeType: r.mime_type,
+    dataUrl: r.data_url,
+    width: Number(r.width) || 0,
+    height: Number(r.height) || 0,
+    sizeBytes: Number(r.size_bytes) || 0,
+    createdAt: Number(r.created_at) || Date.now(),
+  }));
+}
+
+export async function createMedia(
+  biId: string,
+  input: {
+    name: string;
+    mimeType: string;
+    dataUrl: string;
+    width?: number;
+    height?: number;
+    sizeBytes?: number;
+  },
+): Promise<MediaAsset> {
+  const asset: MediaAsset = {
+    id: makeId("med"),
+    name: input.name.trim() || "image",
+    mimeType: input.mimeType || "image/png",
+    dataUrl: input.dataUrl,
+    width: Math.round(input.width || 0),
+    height: Math.round(input.height || 0),
+    sizeBytes: Math.round(input.sizeBytes || input.dataUrl.length),
+    createdAt: Date.now(),
+  };
+  await transact([
+    {
+      sql: `insert into media_assets (id, bi_id, name, mime_type, data_url, width, height, size_bytes, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [
+        asset.id,
+        biId,
+        asset.name,
+        asset.mimeType,
+        asset.dataUrl,
+        asset.width,
+        asset.height,
+        asset.sizeBytes,
+        asset.createdAt,
+      ],
+    },
+  ]);
+  return asset;
+}
+
+export async function deleteMedia(biId: string, id: string): Promise<void> {
+  await transact([
+    { sql: "delete from media_assets where id = ? and bi_id = ?", params: [id, biId] },
+  ]);
+}
+
+export async function listTeamTemplates(biId: string): Promise<TemplateRecord[]> {
+  const { rows } = await query<{
+    id: string;
+    title: string;
+    category: string;
+    width: number;
+    height: number;
+    thumbnail: string;
+    pages_json: string;
+  }>(
+    "select id, title, category, width, height, thumbnail, pages_json from team_templates where bi_id = ? order by created_at desc limit 60",
+    [biId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    category: (r.category as DesignCategory) || "custom",
+    tags: ["Team"],
+    width: Number(r.width) || 1080,
+    height: Number(r.height) || 1080,
+    thumbnail: r.thumbnail || "",
+    isCustom: true,
+    pages: asJson<DesignPage[]>(r.pages_json, []),
+  }));
+}
+
+export async function saveTeamTemplate(
+  biId: string,
+  input: {
+    title: string;
+    category: DesignCategory;
+    width: number;
+    height: number;
+    thumbnail?: string;
+    pages: DesignPage[];
+  },
+): Promise<TemplateRecord> {
+  const id = makeId("tpl");
+  const now = Date.now();
+  await transact([
+    {
+      sql: `insert into team_templates (id, bi_id, title, category, width, height, thumbnail, pages_json, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [
+        id,
+        biId,
+        input.title.trim() || "Team Template",
+        input.category || "custom",
+        Math.round(input.width || 1080),
+        Math.round(input.height || 1080),
+        input.thumbnail || "",
+        JSON.stringify(input.pages),
+        now,
+      ],
+    },
+  ]);
+  return {
+    id,
+    title: input.title.trim() || "Team Template",
+    category: input.category || "custom",
+    tags: ["Team"],
+    width: Math.round(input.width || 1080),
+    height: Math.round(input.height || 1080),
+    thumbnail: input.thumbnail || "",
+    isCustom: true,
+    pages: input.pages,
+  };
+}
+
+export async function deleteTeamTemplate(biId: string, id: string): Promise<void> {
+  await transact([
+    { sql: "delete from team_templates where id = ? and bi_id = ?", params: [id, biId] },
+  ]);
+}
