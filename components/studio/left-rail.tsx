@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
   BarChart3,
   BookmarkPlus,
+  Camera,
   Check,
   Crop,
   Eraser,
@@ -15,6 +16,7 @@ import {
   Image as ImageIcon,
   Layers,
   LayoutTemplate,
+  Loader2,
   Lock,
   Palette,
   Pencil,
@@ -30,6 +32,7 @@ import {
   Type,
   Unlock,
   Upload,
+  Wand2,
   X,
 } from "lucide-react";
 import { PagePreview } from "@/components/page-preview";
@@ -42,8 +45,22 @@ import {
 } from "@/lib/custom-fonts";
 import { VECTOR_ICONS } from "@/lib/icons";
 import { makeId } from "@/lib/id";
-import { applyCropToImage, loadImage, readImageFileOptimized, removeBackgroundInBrowser } from "@/lib/photo-tools";
+import {
+  applyCropToImage,
+  loadImage,
+  optimizeDataUrlImage,
+  readImageFileOptimized,
+  removeBackgroundInBrowser,
+} from "@/lib/photo-tools";
 import { FILTER_PRESETS, FONT_PAIRINGS, GOOGLE_FONTS, SWATCH_PALETTES } from "@/lib/presets";
+import {
+  CURATED_STOCK_PHOTOS,
+  STOCK_CATEGORIES,
+  filterCuratedStock,
+  type StockCategory,
+  type StockPhoto,
+  type StockProvider,
+} from "@/lib/stock-media";
 import { BUILTIN_TEMPLATES, instantiateTemplate } from "@/lib/templates";
 import {
   DEFAULT_IMAGE_FILTERS,
@@ -64,6 +81,7 @@ export type RailTab =
   | "elements"
   | "text"
   | "uploads"
+  | "stock"
   | "photo"
   | "draw"
   | "brand"
@@ -166,11 +184,13 @@ export function LeftRail({
   onSelect,
   onAddElement,
   onUpdateElement,
+  onCommitHistory,
   onDeleteElements,
   onReorderLayer,
   onApplyTemplate,
   teamTemplates,
   onSaveAsTeamTemplate,
+  onDeleteTeamTemplate,
   media,
   onUploadMedia,
   onDeleteMedia,
@@ -183,6 +203,7 @@ export function LeftRail({
   onApplyBrandFont,
   drawTool,
   onChangeDrawTool,
+  onOpenMagicEraser,
 }: {
   activeTab: RailTab | null;
   onTabChange: (tab: RailTab | null) => void;
@@ -194,11 +215,13 @@ export function LeftRail({
   onSelect: (ids: string[]) => void;
   onAddElement: (el: CanvasElement) => void;
   onUpdateElement: (id: string, patch: Partial<CanvasElement>, commit?: boolean) => void;
+  onCommitHistory?: () => void;
   onDeleteElements: (ids: string[]) => void;
   onReorderLayer: (id: string, direction: "up" | "down") => void;
   onApplyTemplate: (pages: DesignPage[], width: number, height: number) => void;
   teamTemplates: TemplateRecord[];
   onSaveAsTeamTemplate: () => Promise<void> | void;
+  onDeleteTeamTemplate?: (id: string) => Promise<void> | void;
   media: MediaAsset[];
   onUploadMedia: (asset: {
     name: string;
@@ -236,6 +259,7 @@ export function LeftRail({
     color: string;
     strokeWidth: number;
   }) => void;
+  onOpenMagicEraser?: (img: ImageElement) => void;
 }) {
   const [iconQuery, setIconQuery] = useState("");
   const [elemCat, setElemCat] = useState<"all" | "shapes" | "charts" | "icons" | "qr">("all");
@@ -249,10 +273,58 @@ export function LeftRail({
   const [googleFontInput, setGoogleFontInput] = useState("");
   const [fontBusy, setFontBusy] = useState(false);
   const [fontStatus, setFontStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [stockQuery, setStockQuery] = useState("");
+  const [stockCategory, setStockCategory] = useState<StockCategory>("all");
+  const [stockPhotos, setStockPhotos] = useState<StockPhoto[]>(CURATED_STOCK_PHOTOS);
+  const [stockProvider, setStockProvider] = useState<StockProvider>("curated");
+  const [stockPage, setStockPage] = useState(1);
+  const [stockHasMore, setStockHasMore] = useState(false);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [insertingStockId, setInsertingStockId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pptxRef = useRef<HTMLInputElement>(null);
   const brandLogoRef = useRef<HTMLInputElement>(null);
   const fontFileRef = useRef<HTMLInputElement>(null);
+
+  const runStockSearch = useCallback(
+    async (query: string, category: StockCategory, pageNum: number, append: boolean) => {
+      setStockLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        params.set("category", category);
+        params.set("page", String(pageNum));
+        const res = await fetch(`/api/stock?${params.toString()}`, { credentials: "include" });
+        if (!res.ok) throw new Error("Stock search unavailable");
+        const data = (await res.json()) as {
+          photos?: StockPhoto[];
+          provider?: StockProvider;
+          hasMore?: boolean;
+        };
+        const nextPhotos = data.photos ?? [];
+        setStockPhotos((prev) => (append ? [...prev, ...nextPhotos] : nextPhotos));
+        setStockProvider(data.provider ?? "curated");
+        setStockHasMore(Boolean(data.hasMore));
+        setStockPage(pageNum);
+      } catch {
+        const fallback = filterCuratedStock(query, category);
+        setStockPhotos((prev) => (append ? prev : fallback));
+        setStockProvider("curated");
+        setStockHasMore(false);
+      } finally {
+        setStockLoading(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (activeTab !== "stock") return;
+    const timer = setTimeout(() => {
+      void runStockSearch(stockQuery, stockCategory, 1, false);
+    }, stockQuery.trim() ? 320 : 0);
+    return () => clearTimeout(timer);
+  }, [activeTab, stockQuery, stockCategory, runStockSearch]);
 
   const hasSelectedText = page.elements.some(
     (el) => selectedIds.includes(el.id) && !el.locked && (el.type === "text" || el.type === "table"),
@@ -441,6 +513,7 @@ export function LeftRail({
     { id: "elements", label: "Elements", icon: Shapes },
     { id: "text", label: "Text", icon: Type },
     { id: "uploads", label: "Uploads", icon: Upload },
+    { id: "stock", label: "Stock", icon: Camera },
     { id: "photo", label: "Photo", icon: ImageIcon },
     { id: "draw", label: "Draw", icon: PenTool },
     { id: "brand", label: "Brand", icon: Palette },
@@ -628,6 +701,54 @@ export function LeftRail({
       mask: "none",
       filters: { ...DEFAULT_IMAGE_FILTERS },
     });
+  };
+
+  const handleInsertStockPhoto = async (photo: StockPhoto) => {
+    if (insertingStockId) return;
+    setInsertingStockId(photo.id);
+    try {
+      let resolvedSrc = photo.fullUrl;
+      let natW = photo.width || 1600;
+      let natH = photo.height || 1067;
+
+      // Prefer server-side proxy so Magic Eraser, Photo Studio & Canvas exports never hit CORS errors
+      try {
+        const res = await fetch("/api/stock", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: photo.fullUrl }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { dataUrl?: string };
+          if (data.dataUrl) {
+            const opt = await optimizeDataUrlImage(data.dataUrl, 1600);
+            resolvedSrc = opt.dataUrl;
+            natW = opt.width;
+            natH = opt.height;
+          }
+        } else {
+          // Fallback: attempt direct CORS-enabled fetch (e.g. images.unsplash.com)
+          const opt = await optimizeDataUrlImage(photo.fullUrl, 1600);
+          resolvedSrc = opt.dataUrl;
+          natW = opt.width;
+          natH = opt.height;
+        }
+      } catch {
+        try {
+          const opt = await optimizeDataUrlImage(photo.fullUrl, 1600);
+          resolvedSrc = opt.dataUrl;
+          natW = opt.width;
+          natH = opt.height;
+        } catch {
+          resolvedSrc = photo.fullUrl;
+        }
+      }
+
+      insertImageOnCanvas(resolvedSrc, photo.title || "Stock Photo", natW, natH);
+    } finally {
+      setInsertingStockId(null);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -820,34 +941,53 @@ export function LeftRail({
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   {allTemplates.map((tpl) => (
-                    <button
+                    <div
                       key={tpl.id}
-                      onClick={() =>
-                        onApplyTemplate(instantiateTemplate(tpl), tpl.width, tpl.height)
-                      }
-                      className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-left transition hover:border-[var(--accent)] cursor-pointer"
+                      className="group relative flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-left transition hover:border-[var(--accent)]"
                     >
-                      <div className="flex h-24 w-full items-center justify-center bg-[var(--stage)] p-1.5">
-                        {tpl.pages[0] && (
-                          <PagePreview
-                            page={tpl.pages[0]}
-                            width={tpl.width}
-                            height={tpl.height}
-                            maxWidth={110}
-                            maxHeight={82}
-                            className="rounded shadow-xs"
-                          />
-                        )}
-                      </div>
-                      <div className="p-2">
-                        <div className="truncate text-[11px] font-semibold text-[var(--fg)]">
-                          {tpl.title}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onApplyTemplate(instantiateTemplate(tpl), tpl.width, tpl.height)
+                        }
+                        className="flex flex-1 flex-col text-left cursor-pointer"
+                      >
+                        <div className="flex h-24 w-full items-center justify-center bg-[var(--stage)] p-1.5">
+                          {tpl.pages[0] && (
+                            <PagePreview
+                              page={tpl.pages[0]}
+                              width={tpl.width}
+                              height={tpl.height}
+                              maxWidth={110}
+                              maxHeight={82}
+                              className="rounded shadow-xs"
+                            />
+                          )}
                         </div>
-                        <div className="text-[10px] text-[var(--muted)]">
-                          {tpl.pages.length > 1 ? `${tpl.pages.length} pages` : `${tpl.width}×${tpl.height}`}
+                        <div className="p-2">
+                          <div className="truncate text-[11px] font-semibold text-[var(--fg)]">
+                            {tpl.title}
+                          </div>
+                          <div className="text-[10px] text-[var(--muted)]">
+                            {tpl.pages.length > 1 ? `${tpl.pages.length} pages` : `${tpl.width}×${tpl.height}`}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      {tpl.isCustom && onDeleteTeamTemplate && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void onDeleteTeamTemplate(tpl.id);
+                          }}
+                          title="Delete team template"
+                          aria-label={`Delete ${tpl.title}`}
+                          className="absolute right-1.5 top-1.5 rounded-md bg-black/70 p-1 text-white opacity-0 transition hover:bg-rose-600 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
                 {page.elements.length > 0 && (
@@ -1312,27 +1452,164 @@ export function LeftRail({
               </>
             )}
 
+            {/* STOCK PHOTOS */}
+            {activeTab === "stock" && (
+              <div className="space-y-3">
+                {/* Search Box */}
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--muted)]" />
+                  <input
+                    value={stockQuery}
+                    onChange={(e) => setStockQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        void runStockSearch(stockQuery, stockCategory, 1, false);
+                      }
+                    }}
+                    placeholder="Search stock photos (e.g. office, coffee)…"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-8 pr-7 text-xs text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
+                  />
+                  {stockQuery && (
+                    <button
+                      onClick={() => setStockQuery("")}
+                      aria-label="Clear stock search"
+                      className="absolute right-2 top-1.5 rounded p-0.5 text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Category Chips */}
+                <div className="flex flex-wrap gap-1">
+                  {STOCK_CATEGORIES.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setStockCategory(cat.id)}
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition cursor-pointer ${
+                        stockCategory === cat.id
+                          ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                          : "bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--fg)]"
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Provider indicator */}
+                <div className="flex items-center justify-between text-[10px] text-[var(--muted)]">
+                  <span>
+                    {stockLoading
+                      ? "Searching…"
+                      : `${stockPhotos.length} photo${stockPhotos.length === 1 ? "" : "s"}`}
+                  </span>
+                  <span className="rounded-md bg-[var(--surface-2)] px-1.5 py-0.5 font-medium">
+                    {stockProvider === "unsplash"
+                      ? "Unsplash"
+                      : stockProvider === "pexels"
+                        ? "Pexels"
+                        : stockProvider === "openverse"
+                          ? "Openverse CC"
+                          : "Curated HD"}
+                  </span>
+                </div>
+
+                {/* Results Grid */}
+                {stockLoading && stockPhotos.length === 0 ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="aspect-[4/3] animate-pulse rounded-xl bg-[var(--surface-2)]"
+                      />
+                    ))}
+                  </div>
+                ) : stockPhotos.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-[var(--border)] py-8 text-center text-xs text-[var(--muted)]">
+                    No photos matched “{stockQuery}”. Try a broader keyword.
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      {stockPhotos.map((photo) => {
+                        const busy = insertingStockId === photo.id;
+                        return (
+                          <button
+                            key={photo.id}
+                            onClick={() => void handleInsertStockPhoto(photo)}
+                            disabled={!!insertingStockId}
+                            title={`${photo.title} — by ${photo.author}`}
+                            className="group relative aspect-[4/3] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-left transition hover:border-[var(--accent)] disabled:opacity-60 cursor-pointer"
+                            style={photo.color ? { backgroundColor: photo.color } : undefined}
+                          >
+                            <img
+                              src={photo.thumbUrl}
+                              alt={photo.title}
+                              loading="lazy"
+                              className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                            />
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/30 to-transparent px-2 pb-1.5 pt-4 opacity-0 transition group-hover:opacity-100">
+                              <div className="truncate text-[10px] font-semibold text-white">
+                                {photo.title}
+                              </div>
+                              <div className="truncate text-[9px] text-white/75">
+                                {photo.author}
+                              </div>
+                            </div>
+                            {busy && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                                <Loader2 className="h-4 w-4 animate-spin text-white" />
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {stockHasMore && (
+                      <button
+                        onClick={() =>
+                          void runStockSearch(stockQuery, stockCategory, stockPage + 1, true)
+                        }
+                        disabled={stockLoading}
+                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-2 text-xs font-semibold text-[var(--fg)] hover:border-[var(--accent)] disabled:opacity-50 cursor-pointer"
+                      >
+                        {stockLoading ? "Loading…" : "Load more photos"}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* PHOTO EDITOR */}
             {activeTab === "photo" && (
               <>
                 {!selectedImg ? (
                   <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-4 text-center text-xs text-[var(--muted)]">
                     <ImageIcon className="mx-auto mb-2 h-6 w-6 text-[var(--accent)]" />
-                    Select a photo on the canvas — or upload one to start editing filters, crop, masks, and background removal.
+                    Select a photo on the canvas — or add one to edit filters, crop, masks, and Magic Eraser cutouts.
                     <button
                       onClick={() => fileRef.current?.click()}
                       className="mt-3 w-full rounded-lg bg-[var(--accent)] py-2 font-semibold text-[var(--accent-fg)] cursor-pointer"
                     >
                       Upload Photo to Edit
                     </button>
+                    <button
+                      onClick={() => onTabChange("stock")}
+                      className="mt-1.5 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] py-2 font-semibold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                    >
+                      Browse Stock Photos
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-4 text-xs">
-                    {/* Background Remover */}
+                    {/* Background Remover & Magic Eraser */}
                     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
                       <div className="flex items-center justify-between font-semibold text-[var(--fg)]">
                         <span className="inline-flex items-center gap-1.5">
-                          <Scissors className="h-3.5 w-3.5 text-[var(--accent)]" /> Background Remover
+                          <Scissors className="h-3.5 w-3.5 text-[var(--accent)]" /> Background & Cutout
                         </span>
                         <span className="text-[10px] text-[var(--muted)]">In-Browser</span>
                       </div>
@@ -1356,7 +1633,7 @@ export function LeftRail({
                           disabled={bgBusy}
                           className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 font-semibold text-[var(--accent-fg)] cursor-pointer disabled:opacity-50"
                         >
-                          {bgBusy ? "Removing…" : "Remove BG"}
+                          {bgBusy ? "Removing…" : "Auto Remove BG"}
                         </button>
                         {selectedImg.originalSrc && selectedImg.src !== selectedImg.originalSrc && (
                           <button
@@ -1373,6 +1650,15 @@ export function LeftRail({
                           </button>
                         )}
                       </div>
+                      {onOpenMagicEraser && (
+                        <button
+                          onClick={() => onOpenMagicEraser(selectedImg)}
+                          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1.5 font-semibold text-[var(--fg)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition cursor-pointer"
+                        >
+                          <Wand2 className="h-3.5 w-3.5" />
+                          Magic Eraser / Refine Brush
+                        </button>
+                      )}
                     </div>
 
                     {/* Quick Crop */}
@@ -1458,6 +1744,8 @@ export function LeftRail({
                                 },
                               } as Partial<ImageElement>)
                             }
+                            onPointerUp={() => onCommitHistory?.()}
+                            onKeyUp={() => onCommitHistory?.()}
                             className="w-full accent-[var(--accent)]"
                           />
                         </div>
