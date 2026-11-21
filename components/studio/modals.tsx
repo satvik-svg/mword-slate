@@ -384,11 +384,13 @@ export function ShareModal({
   onClose: () => void;
   designId: string;
   shareConfig: ShareConfig;
-  onChangeShare: (next: ShareConfig) => void;
+  onChangeShare: (next: ShareConfig) => Promise<boolean> | void;
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"view" | "comment" | "edit" | "full">("edit");
   const [copied, setCopied] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const pendingSaveRef = useRef<Promise<boolean> | null>(null);
 
   useEscapeClose(open, onClose);
 
@@ -397,7 +399,23 @@ export function ShareModal({
   const shareUrl =
     typeof window !== "undefined" ? `${window.location.origin}/share/${designId}` : `/share/${designId}`;
 
+  const commitShareChange = (next: ShareConfig) => {
+    setSaveState("saving");
+    const promise = Promise.resolve(onChangeShare(next)).then((res) => {
+      const ok = res !== false;
+      setSaveState(ok ? "saved" : "error");
+      return ok;
+    });
+    pendingSaveRef.current = promise;
+    void promise.finally(() => {
+      if (pendingSaveRef.current === promise) pendingSaveRef.current = null;
+    });
+  };
+
   const copyLink = async () => {
+    if (pendingSaveRef.current) {
+      await pendingSaveRef.current;
+    }
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
@@ -411,7 +429,7 @@ export function ShareModal({
     const clean = email.trim().toLowerCase();
     if (!clean || !clean.includes("@")) return;
     const filtered = shareConfig.people.filter((p) => p.email.toLowerCase() !== clean);
-    onChangeShare({ ...shareConfig, people: [...filtered, { email: clean, access: role }] });
+    commitShareChange({ ...shareConfig, people: [...filtered, { email: clean, access: role }] });
     setEmail("");
   };
 
@@ -425,7 +443,24 @@ export function ShareModal({
         className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl"
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-[var(--fg)]">Share Design</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-bold text-[var(--fg)]">Share Design</h3>
+            {saveState === "saving" && (
+              <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
+                Saving…
+              </span>
+            )}
+            {saveState === "saved" && (
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                Saved
+              </span>
+            )}
+            {saveState === "error" && (
+              <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-400">
+                Save failed
+              </span>
+            )}
+          </div>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -477,7 +512,7 @@ export function ShareModal({
                     <span className="text-[11px] capitalize text-[var(--muted)]">{p.access}</span>
                     <button
                       onClick={() =>
-                        onChangeShare({
+                        commitShareChange({
                           ...shareConfig,
                           people: shareConfig.people.filter((x) => x.email !== p.email),
                         })
@@ -499,7 +534,7 @@ export function ShareModal({
           <select
             value={shareConfig.linkAccess}
             onChange={(e) =>
-              onChangeShare({ ...shareConfig, linkAccess: e.target.value as AccessLevel })
+              commitShareChange({ ...shareConfig, linkAccess: e.target.value as AccessLevel })
             }
             className="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--fg)] outline-none"
           >
@@ -510,15 +545,28 @@ export function ShareModal({
             <option value="template">Anyone with link can use as template</option>
           </select>
 
+          <p className="mt-1.5 text-[11px] text-[var(--muted)]">
+            {shareConfig.linkAccess === "off"
+              ? "Currently private: only your workspace and invited emails above can open this link."
+              : shareConfig.linkAccess === "edit"
+                ? "Anyone who opens the link below can view and edit live without being invited."
+                : shareConfig.linkAccess === "comment"
+                  ? "Anyone who opens the link below can view and post comments."
+                  : shareConfig.linkAccess === "template"
+                    ? "Anyone who opens the link below can preview and clone as a template."
+                    : "Anyone who opens the link below can view in read-only mode."}
+          </p>
+
           <div className="mt-3 flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
             <Link2 className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
             <span className="flex-1 truncate text-xs text-[var(--muted)]">{shareUrl}</span>
             <button
-              onClick={copyLink}
-              className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-fg)] cursor-pointer"
+              onClick={() => void copyLink()}
+              disabled={saveState === "saving"}
+              className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-fg)] disabled:opacity-60 cursor-pointer"
             >
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-              {copied ? "Copied" : "Copy"}
+              {saveState === "saving" ? "Saving…" : copied ? "Copied" : "Copy"}
             </button>
           </div>
         </div>

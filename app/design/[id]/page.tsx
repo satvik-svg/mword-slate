@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { LoginView } from "@/components/login-view";
 import { SlateMark } from "@/components/slate-logo";
@@ -16,6 +16,7 @@ export default function DesignPageRoute({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const [design, setDesign] = useState<DesignRecord | null>(null);
@@ -29,6 +30,11 @@ export default function DesignPageRoute({
     setLoading(true);
     void fetch(`/api/designs/${encodeURIComponent(id)}`, { credentials: "include" })
       .then(async (res) => {
+        if (res.status === 404) {
+          // If the user opened a /design/<id> link shared from another workspace, route to /share/<id>
+          router.replace(`/share/${encodeURIComponent(id)}`);
+          return;
+        }
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           setError(body.error || "Design not found");
@@ -39,7 +45,7 @@ export default function DesignPageRoute({
       })
       .catch(() => setError("Could not load design"))
       .finally(() => setLoading(false));
-  }, [id, user, authLoading]);
+  }, [id, user, authLoading, router]);
 
   if (authLoading) {
     return (

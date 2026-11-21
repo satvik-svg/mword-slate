@@ -390,7 +390,6 @@ export function StudioEditor({
       pages: latest.pages,
       comments: latest.comments,
       versions: latest.versions,
-      shareConfig: latest.shareConfig,
     });
     // Browser fetch keepalive has a ~64 KB body limit; use keepalive when safely under it
     void fetch(latest.endpoint, {
@@ -449,7 +448,6 @@ export function StudioEditor({
               pages: overrides?.pages ?? pages,
               comments: overrides?.comments ?? comments,
               versions: overrides?.versions ?? versions,
-              shareConfig: overrides?.shareConfig ?? shareConfig,
               thumbnail,
             };
         const res = await fetch(endpoint, {
@@ -484,9 +482,33 @@ export function StudioEditor({
       pages,
       comments,
       versions,
-      shareConfig,
       notify,
     ],
+  );
+
+  // Dedicated lightweight save for Share settings — never blocked or overwritten by canvas auto-saves
+  const persistShareConfig = useCallback(
+    async (next: ShareConfig): Promise<boolean> => {
+      const endpoint = shareEndpoint || `/api/designs/${initialDesign.id}`;
+      try {
+        const res = await fetch(endpoint, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shareConfig: next }),
+        });
+        if (!res.ok) {
+          const err = (await res.json().catch(() => null)) as { error?: string } | null;
+          notify(err?.error || "Could not update share permissions");
+          return false;
+        }
+        return true;
+      } catch {
+        notify("Network error updating share permissions");
+        return false;
+      }
+    },
+    [shareEndpoint, initialDesign.id, notify],
   );
 
   useEffect(() => {
@@ -511,7 +533,7 @@ export function StudioEditor({
         saveTimerRef.current = null;
       }
     };
-  }, [title, width, height, pages, shareConfig, versions, readOnly, persistDesign]);
+  }, [title, width, height, pages, versions, readOnly, persistDesign]);
 
   const sendCollab = useCallback((msg: CollabClientMessage) => {
     const ws = wsRef.current;
@@ -2298,9 +2320,12 @@ export function StudioEditor({
         onClose={() => setShareOpen(false)}
         designId={initialDesign.id}
         shareConfig={shareConfig}
-        onChangeShare={(next) => {
+        onChangeShare={async (next) => {
+          const previous = shareConfig;
           setShareConfig(next);
-          void persistDesign({ shareConfig: next });
+          const ok = await persistShareConfig(next);
+          if (!ok) setShareConfig(previous);
+          return ok;
         }}
       />
 

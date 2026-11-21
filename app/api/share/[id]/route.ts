@@ -67,6 +67,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
       thumbnail?: string;
       comments?: DesignComment[];
       versions?: DesignVersion[];
+      shareConfig?: import("@/lib/types").ShareConfig;
     };
 
     const actor = auth?.email || auth?.displayName || "Guest";
@@ -92,6 +93,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
           thumbnail: body.thumbnail,
           comments: body.comments,
           versions: body.versions,
+          ...(access === "full" && body.shareConfig ? { shareConfig: body.shareConfig } : {}),
         },
         actor,
       );

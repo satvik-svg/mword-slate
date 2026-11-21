@@ -206,6 +206,36 @@ export async function updateDesign(
   const existing = await getDesign(biId, id);
   if (!existing) return null;
 
+  const isShareOnlyPatch =
+    patch.shareConfig !== undefined &&
+    patch.title === undefined &&
+    patch.category === undefined &&
+    patch.folderId === undefined &&
+    patch.starred === undefined &&
+    patch.trashed === undefined &&
+    patch.width === undefined &&
+    patch.height === undefined &&
+    patch.thumbnail === undefined &&
+    patch.pages === undefined &&
+    patch.comments === undefined &&
+    patch.versions === undefined;
+
+  if (isShareOnlyPatch) {
+    const now = Date.now();
+    await transact([
+      {
+        sql: `update designs set share_config_json = ?, updated_by = ?, updated_at = ? where id = ? and bi_id = ?`,
+        params: [JSON.stringify(patch.shareConfig), actor, now, id, biId],
+      },
+    ]);
+    return {
+      ...existing,
+      shareConfig: patch.shareConfig!,
+      updatedBy: actor,
+      updatedAt: now,
+    };
+  }
+
   const nextPages = patch.pages !== undefined ? patch.pages : existing.pages;
   const next: DesignRecord = {
     ...existing,
@@ -226,34 +256,65 @@ export async function updateDesign(
     pageCount: Math.max(1, nextPages.length),
   };
 
-  await transact([
-    {
-      sql: `update designs set
-        title = ?, category = ?, folder_id = ?, starred = ?, trashed = ?,
-        width = ?, height = ?, page_count = ?, thumbnail = ?, pages_json = ?, comments_json = ?,
-        versions_json = ?, share_config_json = ?, updated_by = ?, updated_at = ?
-        where id = ? and bi_id = ?`,
-      params: [
-        next.title,
-        next.category,
-        next.folderId,
-        next.starred ? 1 : 0,
-        next.trashed ? 1 : 0,
-        next.width,
-        next.height,
-        next.pageCount,
-        next.thumbnail,
-        JSON.stringify(next.pages),
-        JSON.stringify(next.comments),
-        JSON.stringify(next.versions),
-        JSON.stringify(next.shareConfig),
-        next.updatedBy,
-        next.updatedAt,
-        id,
-        biId,
-      ],
-    },
-  ]);
+  if (patch.shareConfig !== undefined) {
+    await transact([
+      {
+        sql: `update designs set
+          title = ?, category = ?, folder_id = ?, starred = ?, trashed = ?,
+          width = ?, height = ?, page_count = ?, thumbnail = ?, pages_json = ?, comments_json = ?,
+          versions_json = ?, share_config_json = ?, updated_by = ?, updated_at = ?
+          where id = ? and bi_id = ?`,
+        params: [
+          next.title,
+          next.category,
+          next.folderId,
+          next.starred ? 1 : 0,
+          next.trashed ? 1 : 0,
+          next.width,
+          next.height,
+          next.pageCount,
+          next.thumbnail,
+          JSON.stringify(next.pages),
+          JSON.stringify(next.comments),
+          JSON.stringify(next.versions),
+          JSON.stringify(next.shareConfig),
+          next.updatedBy,
+          next.updatedAt,
+          id,
+          biId,
+        ],
+      },
+    ]);
+  } else {
+    // Omit share_config_json so concurrent auto-saves can never clobber share link permissions
+    await transact([
+      {
+        sql: `update designs set
+          title = ?, category = ?, folder_id = ?, starred = ?, trashed = ?,
+          width = ?, height = ?, page_count = ?, thumbnail = ?, pages_json = ?, comments_json = ?,
+          versions_json = ?, updated_by = ?, updated_at = ?
+          where id = ? and bi_id = ?`,
+        params: [
+          next.title,
+          next.category,
+          next.folderId,
+          next.starred ? 1 : 0,
+          next.trashed ? 1 : 0,
+          next.width,
+          next.height,
+          next.pageCount,
+          next.thumbnail,
+          JSON.stringify(next.pages),
+          JSON.stringify(next.comments),
+          JSON.stringify(next.versions),
+          next.updatedBy,
+          next.updatedAt,
+          id,
+          biId,
+        ],
+      },
+    ]);
+  }
 
   return next;
 }
@@ -268,6 +329,7 @@ export async function updateSharedDesignById(
     comments: DesignComment[];
     versions: DesignVersion[];
     thumbnail: string;
+    shareConfig: ShareConfig;
   }>,
   actor: string,
 ): Promise<DesignRecord | null> {
