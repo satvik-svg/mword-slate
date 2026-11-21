@@ -470,37 +470,44 @@ function renderChartElement(ctx: CanvasRenderingContext2D, el: ChartElement) {
 
   if (el.chartKind === "pie" || el.chartKind === "donut") {
     const total = data.reduce((s, d) => s + Math.max(0, d.value), 0) || 1;
-    const radius = Math.min(chartW, chartH) * 0.44;
-    const cx = el.width * 0.42;
-    const cy = chartY + chartH / 2;
+    const isDonut = el.chartKind === "donut";
+    const availH = Math.max(40, el.height - titleOffset - 16);
+    const radius = Math.max(20, Math.min(el.width * 0.28, availH * 0.44));
+    const innerR = radius * 0.56;
+    const cx = Math.max(radius + 16, el.width * 0.32);
+    const cy = titleOffset + availH / 2;
     let start = -Math.PI / 2;
     data.forEach((d, idx) => {
       const slice = (Math.max(0, d.value) / total) * Math.PI * 2;
+      if (slice <= 0.0001) return;
       ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, radius, start, start + slice);
+      if (isDonut) {
+        ctx.arc(cx, cy, radius, start, start + slice);
+        ctx.arc(cx, cy, innerR, start + slice, start, true);
+      } else {
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, start + slice);
+      }
       ctx.closePath();
       ctx.fillStyle = d.color || palette[idx % palette.length];
       ctx.fill();
       start += slice;
     });
-    if (el.chartKind === "donut") {
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius * 0.52, 0, Math.PI * 2);
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fill();
-    }
     // Legend
     const lx = cx + radius + 24;
+    const rowH = Math.min(28, Math.max(18, Math.floor(availH / Math.max(1, data.length))));
+    const fontSize = Math.min(15, Math.max(11, Math.floor(rowH * 0.58)));
+    const legendTop = Math.max(titleOffset + 8, cy - (data.length * rowH) / 2);
     data.forEach((d, idx) => {
-      const ly = chartY + 12 + idx * 28;
+      const ly = legendTop + idx * rowH;
       ctx.fillStyle = d.color || palette[idx % palette.length];
-      ctx.fillRect(lx, ly, 14, 14);
+      ctx.fillRect(lx, ly + Math.max(0, (rowH - 12) / 2), 12, 12);
       ctx.fillStyle = el.textColor;
-      ctx.font = `500 15px "Inter", sans-serif`;
-      ctx.textBaseline = "top";
+      ctx.font = `500 ${fontSize}px "Inter", sans-serif`;
+      ctx.textBaseline = "middle";
       ctx.textAlign = "left";
-      ctx.fillText(`${d.label} (${d.value})`, lx + 22, ly - 1);
+      const label = el.showValues !== false ? `${d.label} (${d.value})` : d.label;
+      ctx.fillText(label, lx + 18, ly + rowH / 2);
     });
     return;
   }
@@ -557,7 +564,7 @@ function renderChartElement(ctx: CanvasRenderingContext2D, el: ChartElement) {
 
 async function renderQrElement(ctx: CanvasRenderingContext2D, el: QrCodeElement) {
   try {
-    const dataUrl = await QRCode.toDataURL(el.value || "https://mworld-slate.laflabs-tech.workers.dev", {
+    const dataUrl = await QRCode.toDataURL(el.value || "https://slate.laflabs-tech.workers.dev", {
       width: Math.max(128, Math.round(Math.max(el.width, el.height))),
       margin: 1,
       color: { dark: el.fgColor || "#0F172A", light: el.bgColor || "#FFFFFF" },
