@@ -70,6 +70,7 @@ export function CanvasStage({
   onQuickAddHeading,
   onQuickOpenUploads,
   onQuickOpenTemplates,
+  onOpenDataEditor,
 }: {
   page: DesignPage;
   width: number;
@@ -94,6 +95,7 @@ export function CanvasStage({
   onQuickAddHeading?: () => void;
   onQuickOpenUploads?: () => void;
   onQuickOpenTemplates?: () => void;
+  onOpenDataEditor?: () => void;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const artboardRef = useRef<HTMLDivElement>(null);
@@ -542,8 +544,11 @@ export function CanvasStage({
                     onMouseDown={(e) => handleElementMouseDown(e, el)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      if (!readOnly && !el.locked && (el.type === "text" || el.type === "table")) {
+                      if (readOnly || el.locked) return;
+                      if (el.type === "text" || el.type === "table") {
                         setEditingId(el.id);
+                      } else if (el.type === "chart") {
+                        onOpenDataEditor?.();
                       }
                     }}
                     style={{
