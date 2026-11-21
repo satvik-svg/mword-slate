@@ -17,7 +17,7 @@ import {
   type TemplateRecord,
 } from "@/lib/types";
 
-type DesignRow = {
+type DesignSummaryRow = {
   id: string;
   bi_id: string;
   title: string;
@@ -27,10 +27,8 @@ type DesignRow = {
   trashed: number;
   width: number;
   height: number;
+  page_count?: number;
   thumbnail: string;
-  pages_json: string;
-  comments_json: string;
-  versions_json: string;
   share_config_json: string;
   created_by: string;
   updated_by: string;
@@ -38,10 +36,20 @@ type DesignRow = {
   updated_at: number;
 };
 
+type DesignRow = DesignSummaryRow & {
+  pages_json: string;
+  comments_json: string;
+  versions_json: string;
+};
+
 const DEFAULT_SHARE: ShareConfig = { linkAccess: "off", people: [] };
 
-function rowToSummary(row: DesignRow): DesignSummary {
-  const pages = asJson<DesignPage[]>(row.pages_json, []);
+function rowToSummary(row: DesignSummaryRow, fallbackPagesLength?: number): DesignSummary {
+  const countFromCol = Number(row.page_count);
+  const pageCount =
+    Number.isFinite(countFromCol) && countFromCol >= 1
+      ? Math.round(countFromCol)
+      : Math.max(1, fallbackPagesLength ?? 1);
   return {
     id: row.id,
     title: row.title,
@@ -51,7 +59,7 @@ function rowToSummary(row: DesignRow): DesignSummary {
     trashed: asBool(row.trashed),
     width: Number(row.width) || 1080,
     height: Number(row.height) || 1080,
-    pageCount: Math.max(1, pages.length),
+    pageCount,
     thumbnail: row.thumbnail || "",
     shareConfig: asJson<ShareConfig>(row.share_config_json, DEFAULT_SHARE),
     createdBy: row.created_by || "",
@@ -62,21 +70,28 @@ function rowToSummary(row: DesignRow): DesignSummary {
 }
 
 function rowToRecord(row: DesignRow): DesignRecord {
-  const summary = rowToSummary(row);
+  const pages = asJson<DesignPage[]>(row.pages_json, []);
+  const summary = rowToSummary(row, pages.length);
   return {
     ...summary,
-    pages: asJson<DesignPage[]>(row.pages_json, []),
+    pageCount: Math.max(1, pages.length),
+    pages,
     comments: asJson<DesignComment[]>(row.comments_json, []),
     versions: asJson<DesignVersion[]>(row.versions_json, []),
   };
 }
 
 export async function listDesigns(biId: string): Promise<DesignSummary[]> {
-  const { rows } = await query<DesignRow>(
-    "select * from designs where bi_id = ? order by updated_at desc limit 200",
+  const { rows } = await query<DesignSummaryRow>(
+    `select id, bi_id, title, category, folder_id, starred, trashed, width, height, page_count,
+            thumbnail, share_config_json, created_by, updated_by, created_at, updated_at
+     from designs
+     where bi_id = ?
+     order by updated_at desc
+     limit 200`,
     [biId],
   );
-  return rows.map(rowToSummary);
+  return rows.map((row) => rowToSummary(row));
 }
 
 export async function getDesign(biId: string, id: string): Promise<DesignRecord | null> {
@@ -118,14 +133,15 @@ export async function createDesign(input: {
             elements: [],
           },
         ];
+  const pageCount = Math.max(1, pages.length);
 
   await transact([
     {
       sql: `insert into designs (
-        id, bi_id, title, category, folder_id, starred, trashed, width, height,
+        id, bi_id, title, category, folder_id, starred, trashed, width, height, page_count,
         thumbnail, pages_json, comments_json, versions_json, share_config_json,
         created_by, updated_by, created_at, updated_at
-      ) values (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)`,
+      ) values (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)`,
       params: [
         id,
         input.biId,
@@ -134,6 +150,7 @@ export async function createDesign(input: {
         input.folderId ?? null,
         Math.max(100, Math.round(input.width || 1080)),
         Math.max(100, Math.round(input.height || 1080)),
+        pageCount,
         input.thumbnail || "",
         JSON.stringify(pages),
         JSON.stringify(DEFAULT_SHARE),
@@ -154,7 +171,7 @@ export async function createDesign(input: {
     trashed: false,
     width: Math.max(100, Math.round(input.width || 1080)),
     height: Math.max(100, Math.round(input.height || 1080)),
-    pageCount: pages.length,
+    pageCount,
     thumbnail: input.thumbnail || "",
     shareConfig: DEFAULT_SHARE,
     createdBy: input.actor,
@@ -189,6 +206,7 @@ export async function updateDesign(
   const existing = await getDesign(biId, id);
   if (!existing) return null;
 
+  const nextPages = patch.pages !== undefined ? patch.pages : existing.pages;
   const next: DesignRecord = {
     ...existing,
     title: patch.title !== undefined ? patch.title.trim() || "Untitled Design" : existing.title,
@@ -199,20 +217,20 @@ export async function updateDesign(
     width: patch.width !== undefined ? Math.max(100, Math.round(patch.width)) : existing.width,
     height: patch.height !== undefined ? Math.max(100, Math.round(patch.height)) : existing.height,
     thumbnail: patch.thumbnail !== undefined ? patch.thumbnail : existing.thumbnail,
-    pages: patch.pages !== undefined ? patch.pages : existing.pages,
+    pages: nextPages,
     comments: patch.comments !== undefined ? patch.comments : existing.comments,
     versions: patch.versions !== undefined ? patch.versions.slice(0, 20) : existing.versions,
     shareConfig: patch.shareConfig !== undefined ? patch.shareConfig : existing.shareConfig,
     updatedBy: actor,
     updatedAt: Date.now(),
-    pageCount: patch.pages ? Math.max(1, patch.pages.length) : existing.pageCount,
+    pageCount: Math.max(1, nextPages.length),
   };
 
   await transact([
     {
       sql: `update designs set
         title = ?, category = ?, folder_id = ?, starred = ?, trashed = ?,
-        width = ?, height = ?, thumbnail = ?, pages_json = ?, comments_json = ?,
+        width = ?, height = ?, page_count = ?, thumbnail = ?, pages_json = ?, comments_json = ?,
         versions_json = ?, share_config_json = ?, updated_by = ?, updated_at = ?
         where id = ? and bi_id = ?`,
       params: [
@@ -223,6 +241,7 @@ export async function updateDesign(
         next.trashed ? 1 : 0,
         next.width,
         next.height,
+        next.pageCount,
         next.thumbnail,
         JSON.stringify(next.pages),
         JSON.stringify(next.comments),
@@ -243,8 +262,11 @@ export async function updateSharedDesignById(
   id: string,
   patch: Partial<{
     title: string;
+    width: number;
+    height: number;
     pages: DesignPage[];
     comments: DesignComment[];
+    versions: DesignVersion[];
     thumbnail: string;
   }>,
   actor: string,

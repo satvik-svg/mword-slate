@@ -1,6 +1,7 @@
 import { jsonError, optionalAuth } from "@/lib/auth";
-import { getDesignById, updateSharedDesignById } from "@/lib/store";
-import type { DesignComment, DesignPage } from "@/lib/types";
+import { extractReferencedCustomFonts, mergeGuestComments } from "@/lib/share-helpers";
+import { getBrandKit, getDesignById, updateSharedDesignById } from "@/lib/store";
+import type { DesignComment, DesignPage, DesignVersion } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,9 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     if (access === "none") {
       return Response.json({ error: "This design is private" }, { status: 403 });
     }
-    return Response.json({ design: found.record, access });
+    const brandKit = await getBrandKit(found.biId).catch(() => null);
+    const customFonts = extractReferencedCustomFonts(found.record.pages, brandKit?.customFonts);
+    return Response.json({ design: found.record, access, customFonts });
   } catch (error) {
     return jsonError(error);
   }
@@ -59,19 +62,37 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     const body = (await req.json().catch(() => ({}))) as {
       pages?: DesignPage[];
       title?: string;
+      width?: number;
+      height?: number;
       thumbnail?: string;
       comments?: DesignComment[];
+      versions?: DesignVersion[];
     };
 
     const actor = auth?.email || auth?.displayName || "Guest";
-    if (body.comments && (access === "full" || access === "edit" || access === "comment")) {
-      const updated = await updateSharedDesignById(id, { comments: body.comments }, actor);
+    if (access === "comment") {
+      if (!Array.isArray(body.comments)) {
+        return Response.json({ error: "Insufficient permissions" }, { status: 403 });
+      }
+      const merged = mergeGuestComments(found.record.comments ?? [], body.comments, {
+        name: auth?.displayName || auth?.email || "Guest",
+        email: auth?.email || "",
+      });
+      const updated = await updateSharedDesignById(id, { comments: merged }, actor);
       return Response.json({ design: updated, access });
     }
     if (access === "full" || access === "edit") {
       const updated = await updateSharedDesignById(
         id,
-        { pages: body.pages, title: body.title, thumbnail: body.thumbnail },
+        {
+          pages: body.pages,
+          title: body.title,
+          width: body.width,
+          height: body.height,
+          thumbnail: body.thumbnail,
+          comments: body.comments,
+          versions: body.versions,
+        },
         actor,
       );
       return Response.json({ design: updated, access });

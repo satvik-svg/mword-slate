@@ -7,7 +7,8 @@ import { Copy } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { SlateMark } from "@/components/slate-logo";
 import { StudioEditor } from "@/components/studio/studio-editor";
-import type { DesignRecord } from "@/lib/types";
+import { syncCustomFonts } from "@/lib/custom-fonts";
+import type { CustomFontItem, DesignRecord } from "@/lib/types";
 
 export default function ShareDesignPage({
   params,
@@ -19,6 +20,7 @@ export default function ShareDesignPage({
   const { user, login } = useAuth();
 
   const [design, setDesign] = useState<DesignRecord | null>(null);
+  const [customFonts, setCustomFonts] = useState<CustomFontItem[]>([]);
   const [access, setAccess] = useState<"full" | "edit" | "comment" | "view" | "template" | "none">("none");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,11 +32,16 @@ export default function ShareDesignPage({
         const body = (await res.json().catch(() => ({}))) as {
           design?: DesignRecord;
           access?: typeof access;
+          customFonts?: CustomFontItem[];
           error?: string;
         };
         if (!res.ok || !body.design) {
           setError(body.error || "Unable to open shared design");
           return;
+        }
+        if (body.customFonts?.length) {
+          setCustomFonts(body.customFonts);
+          void syncCustomFonts(body.customFonts);
         }
         setDesign(body.design);
         setAccess(body.access || "view");
@@ -127,6 +134,7 @@ export default function ShareDesignPage({
       )}
       <StudioEditor
         initialDesign={design}
+        initialCustomFonts={customFonts}
         readOnly={readOnly}
         canComment={canComment}
         shareEndpoint={`/api/share/${design.id}`}
