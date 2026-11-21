@@ -2,8 +2,10 @@
 
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { SignInGate, useAuth } from "@/components/auth-provider";
+import { useAuth } from "@/components/auth-provider";
 import { HomeDashboard } from "@/components/home-dashboard";
+import { LandingPage } from "@/components/landing-page";
+import { LoginView } from "@/components/login-view";
 import { SlateMark } from "@/components/slate-logo";
 
 function HomeGate() {
@@ -22,11 +24,15 @@ function HomeGate() {
   }
 
   if (!user) {
-    return (
-      <SignInGate
-        errorReason={authFailed ? reason || "Sign-in was cancelled or expired. Try again." : null}
-      />
-    );
+    if (authFailed) {
+      return (
+        <LoginView
+          errorReason={reason || "Sign-in was cancelled or expired. Try again."}
+          showBackLink
+        />
+      );
+    }
+    return <LandingPage />;
   }
 
   return <HomeDashboard />;
