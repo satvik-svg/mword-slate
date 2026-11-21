@@ -622,7 +622,7 @@ export function MagicEraserModal({
           >
             {loading && (
               <div className="rounded-xl bg-[var(--surface)] px-4 py-2.5 text-xs font-medium text-[var(--muted)] shadow">
-                Loading full-resolution pixel canvas…
+                Loading full-resolution pixel editor…
               </div>
             )}
             {error && (

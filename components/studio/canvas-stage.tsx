@@ -1117,7 +1117,7 @@ export function CanvasStage({
             )}
           </div>
 
-          {/* Unscaled Smart Spacing Guides (Canva/Figma-style red distance measurements) */}
+          {/* Unscaled Smart Spacing Guides (red distance measurements) */}
           {spacingGuides.length > 0 && (
             <div className="pointer-events-none absolute inset-0 z-20 overflow-visible">
               {spacingGuides.map((g, idx) => {

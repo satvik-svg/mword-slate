@@ -167,7 +167,7 @@ export function LoginView({
             Sign in to Slate
           </h1>
           <p className="mt-2 text-[13px] leading-relaxed text-[var(--muted)]">
-            Open your personal canvas or shared team workspace.
+            Open your personal studio or shared team workspace.
           </p>
 
           {err && (

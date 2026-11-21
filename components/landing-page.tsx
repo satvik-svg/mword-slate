@@ -990,7 +990,7 @@ export function LandingPage() {
             </aside>
           </div>
 
-          {/* Bottom Canva-Style Filmstrip & Slide Reorder Bar */}
+          {/* Bottom Filmstrip & Slide Reorder Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-2.5">
             <div className="flex items-center gap-2 overflow-x-auto">
               {orderedPages.map((p, idx) => {

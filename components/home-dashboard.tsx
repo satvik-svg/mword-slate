@@ -156,8 +156,9 @@ export function HomeDashboard() {
     height: number;
     pages?: DesignPage[];
     query?: string;
+    busyLabel?: string;
   }) => {
-    setBusyMsg("Opening canvas…");
+    setBusyMsg(input.busyLabel || "Opening studio…");
     try {
       let thumbnail = "";
       const firstPage = input.pages?.[0];
@@ -254,6 +255,7 @@ export function HomeDashboard() {
         height: opt.height,
         pages: [page],
         query: "?tab=photo",
+        busyLabel: "Opening photo editor…",
       });
     } catch {
       showError("Could not load that image file.");
@@ -275,6 +277,7 @@ export function HomeDashboard() {
         width: imported.width,
         height: imported.height,
         pages: imported.pages,
+        busyLabel: "Opening slides…",
       });
     } catch {
       showError("Could not import that .pptx file. Please check that it is a valid PowerPoint presentation.");
@@ -841,7 +844,7 @@ export function HomeDashboard() {
                     </p>
                     {section !== "trash" && section !== "starred" && (
                       <p className="mt-1 text-xs text-[var(--muted)]">
-                        Start a blank canvas, import a PowerPoint, or pick a template.
+                        Start a blank design, import a PowerPoint, or pick a template.
                       </p>
                     )}
                     {section !== "trash" && section !== "starred" && (

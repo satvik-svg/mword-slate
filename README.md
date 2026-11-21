@@ -1,6 +1,6 @@
 # Slate (`slate`)
 
-**Slate** is MWorld’s all-in-one visual design studio — a Canva-class web app for presentations, social graphics, posters, edited photos, and brand kits.
+**Slate** is MWorld’s all-in-one visual design studio — a browser-native web app for presentations, social graphics, posters, edited photos, and brand kits.
 
 - **Worker & Project Name:** `slate`
 - **Deploy URL:** `https://slate.laflabs-tech.workers.dev`

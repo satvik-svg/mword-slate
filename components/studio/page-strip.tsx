@@ -115,7 +115,7 @@ function SlideThumbCard({
           className="pointer-events-none"
         />
 
-        {/* Compact slide index badge (Canva-style bottom-left corner) */}
+        {/* Compact slide index badge (bottom-left corner) */}
         <span
           className={`pointer-events-none absolute bottom-1 left-1 rounded px-1 py-px text-[9px] font-semibold leading-tight backdrop-blur-xs ${
             active
@@ -228,7 +228,7 @@ export function PageStrip({
 
   return (
     <div className="relative shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
-      {/* Centered Canva-style collapse/expand handle */}
+      {/* Centered collapse/expand handle */}
       <button
         type="button"
         onClick={onToggleOpen}

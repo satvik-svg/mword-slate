@@ -1912,7 +1912,7 @@ export function StudioEditor({
             </div>
           )}
 
-          {/* Bottom Canva-style Page Filmstrip + Zoom Controls */}
+          {/* Bottom Page Filmstrip + Zoom Controls */}
           <PageStrip
             pages={pages}
             activePageIdx={activePageIdx}

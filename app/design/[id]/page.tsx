@@ -56,7 +56,7 @@ export default function DesignPageRoute({
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-[var(--bg)]">
         <SlateMark size={38} />
-        <span className="text-xs text-[var(--muted)]">Loading canvas…</span>
+        <span className="text-xs text-[var(--muted)]">Loading studio…</span>
       </div>
     );
   }

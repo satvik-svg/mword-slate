@@ -103,7 +103,7 @@ export const FORMAT_PRESETS: FormatPreset[] = [
   },
   {
     id: "logo-square",
-    label: "Logo Canvas",
+    label: "Logo Mark",
     sublabel: "1000 × 1000 px",
     category: "logo",
     width: 1000,
