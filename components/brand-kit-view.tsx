@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Plus, Trash2, Type, Upload, X } from "lucide-react";
 import {
   cleanFontNameFromFile,
@@ -74,6 +74,51 @@ export function BrandKitView({
   const fontInputRef = useRef<HTMLInputElement>(null);
   const [googleFontInput, setGoogleFontInput] = useState("");
   const [fontBusy, setFontBusy] = useState(false);
+
+  const colorSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingColorKitRef = useRef<BrandKit | null>(null);
+  const onSaveBrandRef = useRef(onSaveBrand);
+  useEffect(() => {
+    onSaveBrandRef.current = onSaveBrand;
+  }, [onSaveBrand]);
+
+  const flushPendingColorSave = () => {
+    if (colorSaveTimerRef.current) {
+      clearTimeout(colorSaveTimerRef.current);
+      colorSaveTimerRef.current = null;
+    }
+    const pending = pendingColorKitRef.current;
+    if (pending) {
+      pendingColorKitRef.current = null;
+      void onSaveBrandRef.current(pending);
+    }
+  };
+
+  const scheduleColorSave = (next: BrandKit) => {
+    onChangeDraft(next);
+    pendingColorKitRef.current = next;
+    if (colorSaveTimerRef.current) clearTimeout(colorSaveTimerRef.current);
+    colorSaveTimerRef.current = setTimeout(() => {
+      colorSaveTimerRef.current = null;
+      const latest = pendingColorKitRef.current;
+      pendingColorKitRef.current = null;
+      if (latest) void onSaveBrandRef.current(latest);
+    }, 280);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (colorSaveTimerRef.current) {
+        clearTimeout(colorSaveTimerRef.current);
+        colorSaveTimerRef.current = null;
+      }
+      const pending = pendingColorKitRef.current;
+      if (pending) {
+        pendingColorKitRef.current = null;
+        void onSaveBrandRef.current(pending);
+      }
+    };
+  }, []);
 
   const customFonts = brandKit.customFonts ?? [];
   const preview = pickBrandPreviewTokens(brandKit.colors);
@@ -310,7 +355,7 @@ export function BrandKitView({
 
             <div className="flex flex-wrap items-start gap-3">
               {brandKit.colors.map((c, idx) => (
-                <div key={`${idx}-${c}`} className="group flex flex-col items-center gap-1.5">
+                <div key={idx} className="group flex flex-col items-center gap-1.5">
                   <div className="relative">
                     <label
                       title={`Edit color ${c}`}
@@ -323,12 +368,13 @@ export function BrandKitView({
                         onChange={(e) => {
                           const next = [...brandKit.colors];
                           next[idx] = e.target.value.toUpperCase();
-                          void onSaveBrand({
+                          scheduleColorSave({
                             ...brandKit,
                             colors: next,
                             updatedAt: Date.now(),
                           });
                         }}
+                        onBlur={flushPendingColorSave}
                         className="sr-only"
                       />
                     </label>

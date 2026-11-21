@@ -233,6 +233,7 @@ export function HomeDashboard() {
             type: "image",
             name: file.name,
             src: opt.dataUrl,
+            originalSrc: opt.dataUrl,
             x: 0,
             y: 0,
             width: opt.width,
@@ -334,7 +335,25 @@ export function HomeDashboard() {
       });
       if (res.ok) {
         const created = (await res.json()) as { design: DesignRecord };
-        setDesigns((prev) => [created.design, ...prev]);
+        const rec = created.design;
+        const summary: DesignSummary = {
+          id: rec.id,
+          title: rec.title,
+          category: rec.category,
+          width: rec.width,
+          height: rec.height,
+          folderId: rec.folderId,
+          starred: rec.starred,
+          trashed: rec.trashed,
+          thumbnail: rec.thumbnail,
+          shareConfig: rec.shareConfig,
+          pageCount: Math.max(1, rec.pages?.length ?? d.pageCount ?? 1),
+          createdBy: rec.createdBy,
+          updatedBy: rec.updatedBy,
+          createdAt: rec.createdAt,
+          updatedAt: rec.updatedAt,
+        };
+        setDesigns((prev) => [summary, ...prev]);
       }
     } finally {
       setBusyMsg(null);
@@ -374,6 +393,17 @@ export function HomeDashboard() {
       method: "DELETE",
       credentials: "include",
     });
+  };
+
+  const handleDeleteTeamTemplate = async (id: string) => {
+    setTeamTemplates((prev) => prev.filter((t) => t.id !== id));
+    const res = await fetch(`/api/templates?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      showError("Could not delete team template.");
+    }
   };
 
   const saveBrand = async (nextKit: BrandKit) => {
@@ -1006,42 +1036,61 @@ export function HomeDashboard() {
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {allTemplates.map((tpl) => (
-                    <button
+                    <div
                       key={tpl.id}
-                      onClick={() =>
-                        void createAndOpen({
-                          title: tpl.title,
-                          category: tpl.category,
-                          width: tpl.width,
-                          height: tpl.height,
-                          pages: instantiateTemplate(tpl),
-                        })
-                      }
-                      className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-left transition hover:border-[var(--border-strong)] cursor-pointer"
+                      className="group relative flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-left transition hover:border-[var(--border-strong)]"
                     >
-                      <div className="flex aspect-[16/10] w-full items-center justify-center bg-[var(--stage)] p-3">
-                        {tpl.pages[0] && (
-                          <PagePreview
-                            page={tpl.pages[0]}
-                            width={tpl.width}
-                            height={tpl.height}
-                            maxWidth={220}
-                            maxHeight={140}
-                            className="rounded-[4px] shadow-xs ring-1 ring-black/5 transition group-hover:scale-[1.02]"
-                          />
-                        )}
-                      </div>
-                      <div className="px-3.5 py-3">
-                        <div className="truncate text-[13px] font-medium text-[var(--fg)]">
-                          {tpl.title}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void createAndOpen({
+                            title: tpl.title,
+                            category: tpl.category,
+                            width: tpl.width,
+                            height: tpl.height,
+                            pages: instantiateTemplate(tpl),
+                          })
+                        }
+                        className="flex flex-1 flex-col text-left cursor-pointer"
+                      >
+                        <div className="flex aspect-[16/10] w-full items-center justify-center bg-[var(--stage)] p-3">
+                          {tpl.pages[0] && (
+                            <PagePreview
+                              page={tpl.pages[0]}
+                              width={tpl.width}
+                              height={tpl.height}
+                              maxWidth={220}
+                              maxHeight={140}
+                              className="rounded-[4px] shadow-xs ring-1 ring-black/5 transition group-hover:scale-[1.02]"
+                            />
+                          )}
                         </div>
-                        <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                          {tpl.pages.length > 1
-                            ? `${tpl.pages.length} slides`
-                            : `${tpl.width} × ${tpl.height}`}
+                        <div className="px-3.5 py-3">
+                          <div className="truncate text-[13px] font-medium text-[var(--fg)]">
+                            {tpl.title}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                            {tpl.pages.length > 1
+                              ? `${tpl.pages.length} slides`
+                              : `${tpl.width} × ${tpl.height}`}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      {tpl.isCustom && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDeleteTeamTemplate(tpl.id);
+                          }}
+                          title="Delete team template"
+                          aria-label={`Delete ${tpl.title}`}
+                          className="absolute right-2 top-2 rounded-md bg-black/75 p-1.5 text-white opacity-0 transition hover:bg-rose-600 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               </section>
