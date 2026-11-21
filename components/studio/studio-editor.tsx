@@ -26,6 +26,11 @@ import {
   pickContrastingText,
 } from "@/lib/brand-style";
 import {
+  chunkString,
+  COLLAB_CHUNK_BYTES,
+  collectPageAssets,
+  hydratePageMedia,
+  stripPageMediaForSync,
   type CollabClientMessage,
   type CollabPeer,
   type CollabServerMessage,
@@ -187,10 +192,36 @@ export function StudioEditor({
   const [remotePeers, setRemotePeers] = useState<CollabPeer[]>([]);
   const [collabConnected, setCollabConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const collabRevRef = useRef(0);
-  const collabFirstMountRef = useRef(true);
-  const suppressCollabBroadcastRef = useRef(false);
+  const lastServerSeqRef = useRef(0);
   const suppressAutoSaveRef = useRef(false);
+  const assetCacheRef = useRef<Map<string, string>>(new Map());
+  const announcedAssetsRef = useRef<Set<string>>(new Set());
+  const incomingAssetsRef = useRef<Map<string, { total: number; parts: string[]; received: number }>>(new Map());
+  const incomingChunksRef = useRef<Map<string, { total: number; parts: string[]; received: number }>>(new Map());
+  const collabLatestRef = useRef<{
+    title: string;
+    width: number;
+    height: number;
+    pages: DesignPage[];
+  }>({
+    title: initialDesign.title,
+    width: initialDesign.width,
+    height: initialDesign.height,
+    pages: initialDesign.pages,
+  });
+  const lastSyncedDesignRef = useRef<{
+    title: string;
+    width: number;
+    height: number;
+    pages: DesignPage[];
+  }>({
+    title: initialDesign.title,
+    width: initialDesign.width,
+    height: initialDesign.height,
+    pages: initialDesign.pages,
+  });
+  const collabThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastBroadcastAtRef = useRef(0);
   const lastCursorSentRef = useRef(0);
   const cursorPosRef = useRef<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -492,6 +523,141 @@ export function StudioEditor({
     }
   }, []);
 
+  const sendAssetChunks = useCallback(
+    (hash: string, dataUrl: string) => {
+      const parts = chunkString(dataUrl, COLLAB_CHUNK_BYTES);
+      for (let i = 0; i < parts.length; i++) {
+        sendCollab({
+          type: "asset_chunk",
+          hash,
+          index: i,
+          total: parts.length,
+          data: parts[i],
+        });
+      }
+    },
+    [sendCollab],
+  );
+
+  const sendLargeCollabMessage = useCallback(
+    (msg: Extract<CollabClientMessage, { type: "page_sync" | "design_sync" }>) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const raw = JSON.stringify(msg);
+      if (raw.length <= COLLAB_CHUNK_BYTES) {
+        try {
+          ws.send(raw);
+        } catch {
+          // ignore closed socket race
+        }
+        return;
+      }
+      const parts = chunkString(raw, COLLAB_CHUNK_BYTES);
+      const transferId = makeId("tx");
+      for (let i = 0; i < parts.length; i++) {
+        sendCollab({
+          type: "chunk",
+          transferId,
+          index: i,
+          total: parts.length,
+          data: parts[i],
+        });
+      }
+    },
+    [sendCollab],
+  );
+
+  // Pre-index all initial inline images so unchanged photos never bloat WebSocket frames
+  useEffect(() => {
+    collectPageAssets(initialDesign.pages, assetCacheRef.current);
+    for (const key of assetCacheRef.current.keys()) {
+      announcedAssetsRef.current.add(key);
+    }
+  }, [initialDesign.id, initialDesign.pages]);
+
+  const flushCollabBroadcast = useCallback(
+    (forceFullDeck = false) => {
+      if (readOnly) return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      const cur = collabLatestRef.current;
+      const prev = lastSyncedDesignRef.current;
+      if (
+        !forceFullDeck &&
+        prev.pages === cur.pages &&
+        prev.title === cur.title &&
+        prev.width === cur.width &&
+        prev.height === cur.height
+      ) {
+        return;
+      }
+
+      lastSyncedDesignRef.current = cur;
+      lastBroadcastAtRef.current = Date.now();
+
+      const sameStructure =
+        !forceFullDeck &&
+        prev.title === cur.title &&
+        prev.width === cur.width &&
+        prev.height === cur.height &&
+        prev.pages.length === cur.pages.length &&
+        cur.pages.every((p, idx) => prev.pages[idx]?.id === p.id);
+
+      let changedPageIndex = -1;
+      let changedCount = 0;
+      if (sameStructure) {
+        for (let i = 0; i < cur.pages.length; i++) {
+          if (cur.pages[i] !== prev.pages[i]) {
+            changedPageIndex = i;
+            changedCount += 1;
+          }
+        }
+      }
+
+      if (sameStructure && changedCount === 1 && changedPageIndex >= 0) {
+        const target = cur.pages[changedPageIndex];
+        const { page: compactPage, newAssets } = stripPageMediaForSync(
+          target,
+          assetCacheRef.current,
+          announcedAssetsRef.current,
+        );
+        for (const asset of newAssets) {
+          sendAssetChunks(asset.hash, asset.dataUrl);
+        }
+        sendLargeCollabMessage({
+          type: "page_sync",
+          pageId: target.id,
+          page: compactPage,
+        });
+        return;
+      }
+
+      const compactPages: DesignPage[] = [];
+      const newAssets: { hash: string; dataUrl: string }[] = [];
+      for (const p of cur.pages) {
+        const stripped = stripPageMediaForSync(
+          p,
+          assetCacheRef.current,
+          announcedAssetsRef.current,
+        );
+        compactPages.push(stripped.page);
+        if (stripped.newAssets.length) newAssets.push(...stripped.newAssets);
+      }
+      for (const asset of newAssets) {
+        sendAssetChunks(asset.hash, asset.dataUrl);
+      }
+      sendLargeCollabMessage({
+        type: "design_sync",
+        title: cur.title,
+        width: cur.width,
+        height: cur.height,
+        pages: compactPages,
+      });
+    },
+    [readOnly, sendAssetChunks, sendLargeCollabMessage],
+  );
+
   // Connect to Cloudflare Durable Object multiplayer room for this design
   useEffect(() => {
     if (typeof window === "undefined" || typeof WebSocket === "undefined") return;
@@ -503,6 +669,85 @@ export function StudioEditor({
 
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${proto}//${window.location.host}/api/collab/${encodeURIComponent(initialDesign.id)}`;
+
+    const applyIncomingPageSync = (pageId: string, incomingPage: DesignPage, seq: number) => {
+      if (seq > 0 && seq < lastServerSeqRef.current) return;
+      if (seq > 0) lastServerSeqRef.current = seq;
+
+      const { page: hydrated, missingHashes } = hydratePageMedia(incomingPage, assetCacheRef.current);
+      for (const hash of missingHashes) {
+        sendCollab({ type: "request_asset", hash });
+      }
+
+      const cur = collabLatestRef.current;
+      const idx = cur.pages.findIndex((p) => p.id === pageId);
+      const nextPages =
+        idx >= 0
+          ? cur.pages.map((p, i) => (i === idx ? hydrated : p))
+          : [...cur.pages, hydrated];
+
+      const nextSnapshot = { ...cur, pages: nextPages };
+      collabLatestRef.current = nextSnapshot;
+      lastSyncedDesignRef.current = nextSnapshot;
+      if (!dirtyRef.current) suppressAutoSaveRef.current = true;
+      setPages(nextPages);
+    };
+
+    const applyIncomingDesignSync = (
+      payload: { title?: string; width?: number; height?: number; pages: DesignPage[] },
+      seq: number,
+    ) => {
+      if (seq > 0 && seq < lastServerSeqRef.current) return;
+      if (seq > 0) lastServerSeqRef.current = seq;
+      if (!Array.isArray(payload.pages) || payload.pages.length === 0) return;
+
+      const missing = new Set<string>();
+      const hydratedPages = payload.pages.map((p) => {
+        const res = hydratePageMedia(p, assetCacheRef.current);
+        for (const h of res.missingHashes) missing.add(h);
+        return res.page;
+      });
+      for (const hash of missing) {
+        sendCollab({ type: "request_asset", hash });
+      }
+
+      const cur = collabLatestRef.current;
+      const nextTitle = typeof payload.title === "string" ? payload.title : cur.title;
+      const nextWidth = typeof payload.width === "number" && payload.width > 0 ? payload.width : cur.width;
+      const nextHeight = typeof payload.height === "number" && payload.height > 0 ? payload.height : cur.height;
+
+      const nextSnapshot = {
+        title: nextTitle,
+        width: nextWidth,
+        height: nextHeight,
+        pages: hydratedPages,
+      };
+      collabLatestRef.current = nextSnapshot;
+      lastSyncedDesignRef.current = nextSnapshot;
+      if (!dirtyRef.current) suppressAutoSaveRef.current = true;
+
+      setPages(hydratedPages);
+      setActivePageIdx((c) => Math.max(0, Math.min(c, hydratedPages.length - 1)));
+      if (nextTitle !== cur.title) setTitle(nextTitle);
+      if (nextWidth !== cur.width) setWidth(nextWidth);
+      if (nextHeight !== cur.height) setHeight(nextHeight);
+    };
+
+    const rehydrateAllPages = () => {
+      const cur = collabLatestRef.current;
+      let changed = false;
+      const nextPages = cur.pages.map((p) => {
+        const { page: hydrated } = hydratePageMedia(p, assetCacheRef.current);
+        if (hydrated !== p) changed = true;
+        return hydrated;
+      });
+      if (!changed) return;
+      const nextSnapshot = { ...cur, pages: nextPages };
+      collabLatestRef.current = nextSnapshot;
+      lastSyncedDesignRef.current = nextSnapshot;
+      if (!dirtyRef.current) suppressAutoSaveRef.current = true;
+      setPages(nextPages);
+    };
 
     const connect = () => {
       if (disposed) return;
@@ -521,6 +766,8 @@ export function StudioEditor({
         }
         openedOnce = true;
         reconnectAttempt = 0;
+        // Align synced baseline so connecting never broadcasts stale initial state
+        lastSyncedDesignRef.current = collabLatestRef.current;
         setCollabConnected(true);
         try {
           ws.send(
@@ -558,12 +805,19 @@ export function StudioEditor({
         }
 
         if (msg.type === "welcome") {
+          if (typeof msg.seq === "number" && msg.seq > lastServerSeqRef.current) {
+            lastServerSeqRef.current = msg.seq;
+          }
           setRemotePeers(msg.peers);
         } else if (msg.type === "peer_join") {
           setRemotePeers((prev) => [
             ...prev.filter((p) => p.clientId !== msg.peer.clientId),
             msg.peer,
           ]);
+          // If we have unsaved live edits not yet persisted to DB, bring the new joiner up to date
+          if (!readOnly && dirtyRef.current) {
+            flushCollabBroadcast(true);
+          }
         } else if (msg.type === "peer_leave") {
           setRemotePeers((prev) => prev.filter((p) => p.clientId !== msg.clientId));
         } else if (msg.type === "cursor") {
@@ -582,18 +836,58 @@ export function StudioEditor({
                 : p,
             ),
           );
+        } else if (msg.type === "page_sync") {
+          applyIncomingPageSync(msg.pageId, msg.page, msg.seq);
         } else if (msg.type === "design_sync") {
-          if (msg.rev < collabRevRef.current) return;
-          collabRevRef.current = Math.max(collabRevRef.current, msg.rev);
-          suppressCollabBroadcastRef.current = true;
-          suppressAutoSaveRef.current = true;
-          if (Array.isArray(msg.pages) && msg.pages.length > 0) {
-            setPages(msg.pages);
-            setActivePageIdx((cur) => Math.max(0, Math.min(cur, msg.pages.length - 1)));
+          applyIncomingDesignSync(msg, msg.seq);
+        } else if (msg.type === "asset_chunk") {
+          const { hash, index, total, data } = msg;
+          if (!hash || total <= 0 || index < 0 || index >= total) return;
+          let entry = incomingAssetsRef.current.get(hash);
+          if (!entry || entry.total !== total) {
+            entry = { total, parts: new Array<string>(total), received: 0 };
+            incomingAssetsRef.current.set(hash, entry);
           }
-          if (typeof msg.title === "string") setTitle(msg.title);
-          if (typeof msg.width === "number" && msg.width > 0) setWidth(msg.width);
-          if (typeof msg.height === "number" && msg.height > 0) setHeight(msg.height);
+          if (entry.parts[index] === undefined) {
+            entry.parts[index] = data;
+            entry.received += 1;
+          }
+          if (entry.received >= entry.total) {
+            incomingAssetsRef.current.delete(hash);
+            const fullDataUrl = entry.parts.join("");
+            assetCacheRef.current.set(hash, fullDataUrl);
+            announcedAssetsRef.current.add(hash);
+            rehydrateAllPages();
+          }
+        } else if (msg.type === "request_asset") {
+          if (readOnly) return;
+          const found = assetCacheRef.current.get(msg.hash);
+          if (found) sendAssetChunks(msg.hash, found);
+        } else if (msg.type === "chunk") {
+          const { transferId, index, total, data, seq } = msg;
+          if (!transferId || total <= 0 || index < 0 || index >= total) return;
+          let entry = incomingChunksRef.current.get(transferId);
+          if (!entry || entry.total !== total) {
+            entry = { total, parts: new Array<string>(total), received: 0 };
+            incomingChunksRef.current.set(transferId, entry);
+          }
+          if (entry.parts[index] === undefined) {
+            entry.parts[index] = data;
+            entry.received += 1;
+          }
+          if (entry.received >= entry.total) {
+            incomingChunksRef.current.delete(transferId);
+            try {
+              const parsed = JSON.parse(entry.parts.join("")) as CollabClientMessage;
+              if (parsed.type === "page_sync") {
+                applyIncomingPageSync(parsed.pageId, parsed.page, seq);
+              } else if (parsed.type === "design_sync") {
+                applyIncomingDesignSync(parsed, seq);
+              }
+            } catch {
+              // ignore malformed reassembled chunk
+            }
+          }
         } else if (msg.type === "comments_sync") {
           if (Array.isArray(msg.comments)) {
             setComments(msg.comments);
@@ -627,6 +921,10 @@ export function StudioEditor({
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (pingTimer) clearInterval(pingTimer);
+      if (collabThrottleTimerRef.current) {
+        clearTimeout(collabThrottleTimerRef.current);
+        collabThrottleTimerRef.current = null;
+      }
       const ws = wsRef.current;
       wsRef.current = null;
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -637,7 +935,7 @@ export function StudioEditor({
         }
       }
     };
-  }, [initialDesign.id]);
+  }, [initialDesign.id, readOnly, sendCollab, sendAssetChunks, flushCollabBroadcast]);
 
   // Broadcast throttled pointer updates to peers
   const handleCursorMove = useCallback(
@@ -671,30 +969,36 @@ export function StudioEditor({
     });
   }, [collabConnected, activePage.id, selectedIds, sendCollab]);
 
-  // Broadcast local design mutations to live peers (debounced 120ms)
+  // Keep latest design snapshot updated and stream local edits smoothly (leading + 55ms throttle + trailing flush)
   useEffect(() => {
-    if (collabFirstMountRef.current) {
-      collabFirstMountRef.current = false;
-      return;
-    }
+    collabLatestRef.current = { title, width, height, pages };
     if (readOnly || !collabConnected) return;
-    if (suppressCollabBroadcastRef.current) {
-      suppressCollabBroadcastRef.current = false;
+
+    const prev = lastSyncedDesignRef.current;
+    if (
+      prev.pages === pages &&
+      prev.title === title &&
+      prev.width === width &&
+      prev.height === height
+    ) {
       return;
     }
-    const timer = setTimeout(() => {
-      collabRevRef.current += 1;
-      sendCollab({
-        type: "design_sync",
-        rev: collabRevRef.current,
-        title,
-        width,
-        height,
-        pages,
-      });
-    }, 120);
-    return () => clearTimeout(timer);
-  }, [title, width, height, pages, readOnly, collabConnected, sendCollab]);
+
+    const MIN_INTERVAL_MS = 55;
+    const elapsed = Date.now() - lastBroadcastAtRef.current;
+    if (elapsed >= MIN_INTERVAL_MS) {
+      if (collabThrottleTimerRef.current) {
+        clearTimeout(collabThrottleTimerRef.current);
+        collabThrottleTimerRef.current = null;
+      }
+      flushCollabBroadcast(false);
+    } else if (!collabThrottleTimerRef.current) {
+      collabThrottleTimerRef.current = setTimeout(() => {
+        collabThrottleTimerRef.current = null;
+        flushCollabBroadcast(false);
+      }, MIN_INTERVAL_MS - elapsed);
+    }
+  }, [title, width, height, pages, readOnly, collabConnected, flushCollabBroadcast]);
 
   // Element & page mutation helpers
   const updateActivePageElements = useCallback(

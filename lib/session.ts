@@ -24,10 +24,16 @@ export function signSession(claims: Omit<SessionClaims, "exp">, now = Date.now()
   return `${payload}.${sig}`;
 }
 
-export function readSessionToken(token: string, now = Date.now()): SessionClaims | null {
+export function readSessionToken(
+  token: string,
+  now = Date.now(),
+  secretOverride?: string,
+): SessionClaims | null {
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
-  const expected = createHmac("sha256", secret()).update(payload).digest("base64url");
+  const expected = createHmac("sha256", secretOverride || secret())
+    .update(payload)
+    .digest("base64url");
   const left = Buffer.from(sig);
   const right = Buffer.from(expected);
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;

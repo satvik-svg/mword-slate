@@ -92,6 +92,12 @@ function safeSend(ws: WebSocket, payload: unknown) {
 
 export class SlateDB extends DurableObject {
   private ready = false;
+  private roomSeq = 0;
+
+  private nextSeq(): number {
+    this.roomSeq = Math.max(this.roomSeq + 1, Date.now());
+    return this.roomSeq;
+  }
 
   private ensureSchema() {
     if (this.ready) return;
@@ -175,6 +181,7 @@ export class SlateDB extends DurableObject {
       clientId,
       role,
       color,
+      seq: this.roomSeq,
       peers: existingPeers,
     });
 
@@ -186,7 +193,7 @@ export class SlateDB extends DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, rawMessage: string | ArrayBuffer) {
-    if (typeof rawMessage !== "string" || rawMessage.length > 2_000_000) return;
+    if (typeof rawMessage !== "string" || rawMessage.length > 950_000) return;
 
     let msg: CollabClientMessage;
     try {
@@ -231,17 +238,86 @@ export class SlateDB extends DurableObject {
       return;
     }
 
+    if (msg.type === "page_sync") {
+      if (!canRoleBroadcastDesign(peer.role) || !msg.pageId || !msg.page) return;
+      const out = {
+        type: "page_sync",
+        fromClientId: peer.clientId,
+        fromName: peer.name,
+        seq: this.nextSeq(),
+        pageId: msg.pageId,
+        page: msg.page,
+      };
+      for (const sock of others) safeSend(sock, out);
+      return;
+    }
+
     if (msg.type === "design_sync") {
       if (!canRoleBroadcastDesign(peer.role) || !Array.isArray(msg.pages)) return;
       const out = {
         type: "design_sync",
         fromClientId: peer.clientId,
         fromName: peer.name,
-        rev: typeof msg.rev === "number" ? msg.rev : Date.now(),
+        seq: this.nextSeq(),
         title: typeof msg.title === "string" ? msg.title : undefined,
         width: typeof msg.width === "number" ? msg.width : undefined,
         height: typeof msg.height === "number" ? msg.height : undefined,
         pages: msg.pages,
+      };
+      for (const sock of others) safeSend(sock, out);
+      return;
+    }
+
+    if (msg.type === "asset_chunk") {
+      if (
+        !canRoleBroadcastDesign(peer.role) ||
+        typeof msg.hash !== "string" ||
+        typeof msg.data !== "string" ||
+        msg.data.length > 260_000
+      ) {
+        return;
+      }
+      const out = {
+        type: "asset_chunk",
+        fromClientId: peer.clientId,
+        hash: msg.hash,
+        index: msg.index,
+        total: msg.total,
+        data: msg.data,
+      };
+      for (const sock of others) safeSend(sock, out);
+      return;
+    }
+
+    if (msg.type === "request_asset") {
+      if (typeof msg.hash !== "string" || !msg.hash) return;
+      const out = {
+        type: "request_asset",
+        fromClientId: peer.clientId,
+        hash: msg.hash,
+      };
+      for (const sock of others) safeSend(sock, out);
+      return;
+    }
+
+    if (msg.type === "chunk") {
+      if (
+        !canRoleBroadcastDesign(peer.role) ||
+        typeof msg.transferId !== "string" ||
+        typeof msg.data !== "string" ||
+        msg.data.length > 260_000
+      ) {
+        return;
+      }
+      const out = {
+        type: "chunk",
+        fromClientId: peer.clientId,
+        fromName: peer.name,
+        seq: msg.index === msg.total - 1 ? this.nextSeq() : this.roomSeq,
+        transferId: msg.transferId,
+        index: msg.index,
+        total: msg.total,
+        data: msg.data,
       };
       for (const sock of others) safeSend(sock, out);
       return;

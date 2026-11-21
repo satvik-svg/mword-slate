@@ -30,12 +30,12 @@ const worker = {
         return new Response("Collaboration unavailable", { status: 503 });
       }
 
-      // Check session cookie (and allow local dev bypass when MAUTH_ENABLED !== "true")
-      if (typeof env.SESSION_SECRET === "string" && !process.env.SESSION_SECRET) {
-        process.env.SESSION_SECRET = env.SESSION_SECRET;
+      const sessionSecret = typeof env.SESSION_SECRET === "string" ? env.SESSION_SECRET : undefined;
+      if (sessionSecret && !process.env.SESSION_SECRET) {
+        process.env.SESSION_SECRET = sessionSecret;
       }
       const rawToken = readCookie(request, SESSION_COOKIE);
-      const claims = rawToken ? readSessionToken(rawToken) : null;
+      const claims = rawToken ? readSessionToken(rawToken, Date.now(), sessionSecret) : null;
       const mauthEnabled = String(env.MAUTH_ENABLED ?? "true") === "true";
 
       const viewerBiId = claims?.biId ?? (mauthEnabled ? undefined : "local-dev");

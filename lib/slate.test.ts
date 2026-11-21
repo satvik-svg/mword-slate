@@ -808,11 +808,15 @@ test("PPTX importer honors presentation slide order, parses native charts, and p
 });
 
 import {
+  ASSET_REF_PREFIX,
   canRoleBroadcastComments,
   canRoleBroadcastDesign,
+  chunkString,
   collabColorForSeed,
+  hydratePageMedia,
   initialsFromName,
   resolveCollabAccess,
+  stripPageMediaForSync,
 } from "./collab";
 import { parsePageRange } from "./exporter";
 import {
@@ -823,7 +827,7 @@ import {
   computeSpacingGuides,
   getSelectionBounds,
 } from "./geometry";
-import type { CanvasElement, ShapeElement } from "./types";
+import { DEFAULT_IMAGE_FILTERS, type CanvasElement, type ShapeElement } from "./types";
 
 function makeRect(id: string, x: number, y: number, width: number, height: number, extra?: Partial<ShapeElement>): ShapeElement {
   return {
@@ -1166,6 +1170,65 @@ test("Stock media filter and SSRF host allowlist work as expected", () => {
   assert.equal(isAllowedStockImageUrl("https://169.254.169.254/latest/meta-data"), false);
   assert.equal(isAllowedStockImageUrl("https://user:pass@images.unsplash.com/a"), false);
   assert.equal(isAllowedStockImageUrl("https://evil.example.com/a.jpg"), false);
+});
+
+test("Collab sync strips large base64 images into compact refs, rehydrates from cache, and chunks big payloads", () => {
+  const bigImg = `data:image/jpeg;base64,${"A".repeat(12_000)}`;
+  const page: DesignPage = {
+    id: "pg_sync_1",
+    name: "Slide 1",
+    background: "#FFFFFF",
+    backgroundImage: bigImg,
+    elements: [
+      {
+        id: "img_1",
+        type: "image",
+        x: 40,
+        y: 50,
+        width: 300,
+        height: 200,
+        rotation: 0,
+        opacity: 1,
+        src: bigImg,
+        originalSrc: bigImg,
+        fit: "cover",
+        borderRadius: 0,
+        mask: "none",
+        filters: { ...DEFAULT_IMAGE_FILTERS },
+      },
+    ],
+  };
+
+  const senderCache = new Map<string, string>();
+  const announced = new Set<string>();
+  const first = stripPageMediaForSync(page, senderCache, announced);
+  assert.equal(first.newAssets.length, 1);
+  assert.ok(first.page.backgroundImage?.startsWith(ASSET_REF_PREFIX));
+  const strippedEl = first.page.elements[0];
+  assert.equal(strippedEl.type, "image");
+  assert.ok(strippedEl.src.startsWith(ASSET_REF_PREFIX));
+  assert.ok(JSON.stringify(first.page).length < 1_000);
+
+  // Second broadcast with unchanged image emits zero newAssets
+  const second = stripPageMediaForSync(page, senderCache, announced);
+  assert.equal(second.newAssets.length, 0);
+
+  // Cold receiver detects missing hash, then hydrates cleanly once asset arrives
+  const receiverCache = new Map<string, string>();
+  const cold = hydratePageMedia(first.page, receiverCache);
+  assert.equal(cold.missingHashes.length, 1);
+
+  receiverCache.set(first.newAssets[0].hash, first.newAssets[0].dataUrl);
+  const warm = hydratePageMedia(first.page, receiverCache);
+  assert.equal(warm.missingHashes.length, 0);
+  assert.equal(warm.page.backgroundImage, bigImg);
+  assert.equal(warm.page.elements[0].type === "image" ? warm.page.elements[0].src : "", bigImg);
+
+  // Chunking splits oversized frames and reassembles identically
+  const payload = "x".repeat(450_000);
+  const parts = chunkString(payload, 180_000);
+  assert.equal(parts.length, 3);
+  assert.equal(parts.join(""), payload);
 });
 
 
