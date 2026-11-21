@@ -38,7 +38,7 @@ function AuthCallbackInner() {
           if (!res.ok) {
             const failed = (await res.json().catch(() => ({}))) as { error?: string };
             const reason = encodeURIComponent(failed.error ?? "Invalid mAuth session");
-            window.location.replace(`/?auth=failed&reason=${reason}`);
+            window.location.replace(`/login?auth=failed&reason=${reason}`);
             return;
           }
           let nextPath = "/";
@@ -54,12 +54,12 @@ function AuthCallbackInner() {
           window.location.replace(window.location.origin + nextPath);
         })
         .catch(() => {
-          window.location.replace("/?auth=failed&reason=Could%20not%20finish%20login");
+          window.location.replace("/login?auth=failed&reason=Could%20not%20finish%20login");
         });
       return;
     }
 
-    window.location.replace("/?auth=failed");
+    window.location.replace("/login?auth=failed");
   }, []);
 
   return (
