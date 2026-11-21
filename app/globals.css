@@ -105,3 +105,61 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(130, 130, 142, 0.48);
 }
+
+@keyframes slate-present-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slate-present-slide-next {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slate-present-slide-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slate-present-zoom {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.present-anim-fade {
+  animation: slate-present-fade 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.present-anim-slide-next {
+  animation: slate-present-slide-next 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.present-anim-slide-prev {
+  animation: slate-present-slide-prev 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.present-anim-zoom {
+  animation: slate-present-zoom 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}

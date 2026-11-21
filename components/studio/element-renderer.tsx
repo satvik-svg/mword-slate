@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import QRCode from "qrcode";
 import { getVectorIcon } from "@/lib/icons";
 import { cssFilterFromImageFilters } from "@/lib/presets";
@@ -16,11 +16,12 @@ import type {
   TextElement,
 } from "@/lib/types";
 
-function shapeClipOrSvg(el: ShapeElement) {
+function ShapeView({ el }: { el: ShapeElement }) {
+  const uid = useId().replace(/:/g, "");
   const { width: w, height: h } = el;
   const cx = w / 2;
   const cy = h / 2;
-  const gradId = `grad_${el.id}`;
+  const gradId = `grad_${el.id}_${uid}`;
   const fillVal =
     el.gradientTo ? `url(#${gradId})` : el.fill === "transparent" || !el.fill ? "none" : el.fill;
   const dash =
@@ -162,6 +163,11 @@ function ImageMaskWrapper({ el }: { el: ImageElement }) {
     }
   }
 
+  const cropZoom = Math.max(1, el.cropZoom ?? 1);
+  const cropOffsetX = el.cropOffsetX ?? 0;
+  const cropOffsetY = el.cropOffsetY ?? 0;
+  const hasCropTransform = cropZoom !== 1 || cropOffsetX !== 0 || cropOffsetY !== 0;
+
   return (
     <div className="relative h-full w-full overflow-hidden" style={clipStyle}>
       <img
@@ -172,6 +178,10 @@ function ImageMaskWrapper({ el }: { el: ImageElement }) {
         style={{
           objectFit: el.fit || "cover",
           filter: cssFilterFromImageFilters(el.filters),
+          transform: hasCropTransform
+            ? `translate(${cropOffsetX}%, ${cropOffsetY}%) scale(${cropZoom})`
+            : undefined,
+          transformOrigin: "center center",
         }}
       />
       {el.filters?.vignette > 0 && (
@@ -479,17 +489,33 @@ function IconView({ el }: { el: IconElement }) {
 }
 
 function CurvedTextView({ el }: { el: TextElement }) {
+  const uid = useId().replace(/:/g, "");
   const curve = el.curve ?? 0;
-  const pathId = `curve_${el.id}`;
+  const pathId = `curve_${el.id}_${uid}`;
   const midY = el.height / 2;
   const ctrlY = midY - (curve / 100) * (el.height * 0.9);
+  const displayText =
+    el.textTransform === "uppercase"
+      ? el.text.toUpperCase()
+      : el.textTransform === "lowercase"
+        ? el.text.toLowerCase()
+        : el.text;
+  const shadowStyle =
+    el.shadowColor && el.shadowBlur
+      ? {
+          filter: `drop-shadow(${el.shadowOffsetX ?? 0}px ${el.shadowOffsetY ?? 4}px ${el.shadowBlur / 2}px ${el.shadowColor})`,
+        }
+      : undefined;
   return (
-    <svg width="100%" height="100%" viewBox={`0 0 ${el.width} ${el.height}`} className="block overflow-visible">
+    <svg width="100%" height="100%" viewBox={`0 0 ${el.width} ${el.height}`} className="block overflow-visible" style={shadowStyle}>
       <defs>
         <path id={pathId} d={`M 8 ${midY} Q ${el.width / 2} ${ctrlY} ${el.width - 8} ${midY}`} />
       </defs>
       <text
         fill={el.color}
+        stroke={el.strokeColor && el.strokeWidth ? el.strokeColor : undefined}
+        strokeWidth={el.strokeColor && el.strokeWidth ? el.strokeWidth : undefined}
+        paintOrder="stroke fill"
         fontFamily={`"${el.fontFamily}", sans-serif`}
         fontSize={el.fontSize}
         fontWeight={el.fontWeight}
@@ -497,7 +523,7 @@ function CurvedTextView({ el }: { el: TextElement }) {
         letterSpacing={el.letterSpacing || 0}
       >
         <textPath href={`#${pathId}`} startOffset="50%" textAnchor="middle">
-          {el.text}
+          {displayText}
         </textPath>
       </text>
     </svg>
@@ -510,14 +536,16 @@ export function ElementRenderer({
   onChangeText,
   onEndEdit,
   onChangeTableCell,
+  onCommitTableCell,
 }: {
   element: CanvasElement;
   editing?: boolean;
   onChangeText?: (text: string) => void;
   onEndEdit?: () => void;
   onChangeTableCell?: (row: number, col: number, value: string) => void;
+  onCommitTableCell?: () => void;
 }) {
-  if (element.type === "shape") return <>{shapeClipOrSvg(element)}</>;
+  if (element.type === "shape") return <ShapeView el={element} />;
   if (element.type === "image") return <ImageMaskWrapper el={element} />;
   if (element.type === "icon") return <IconView el={element} />;
   if (element.type === "draw") return <DrawView el={element} />;
@@ -558,7 +586,14 @@ export function ElementRenderer({
                       <input
                         value={cell}
                         onChange={(e) => onChangeTableCell(ri, ci, e.target.value)}
+                        onBlur={() => onCommitTableCell?.()}
                         onMouseDown={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Escape") onEndEdit?.();
+                          if (e.key === "Enter") onCommitTableCell?.();
+                        }}
                         className="w-full bg-transparent outline-none"
                         style={{ color: "inherit", fontWeight: "inherit", fontSize: "inherit" }}
                       />
@@ -615,6 +650,7 @@ export function ElementRenderer({
         onChange={(e) => onChangeText(e.target.value)}
         onBlur={onEndEdit}
         onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === "Escape") onEndEdit?.();
