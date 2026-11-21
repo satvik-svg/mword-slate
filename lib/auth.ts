@@ -216,7 +216,7 @@ export async function requireAuth(req: Request): Promise<AuthContext> {
 
   const tokens = getTokenFromRequest(req);
   if (tokens.agentic) return verifyAgentic(tokens.agentic);
-  throw new AuthError(401, "Log in with mWorld");
+  throw new AuthError(401, "Sign in required");
 }
 
 export async function optionalAuth(req: Request): Promise<AuthContext | null> {
@@ -230,7 +230,7 @@ export async function optionalAuth(req: Request): Promise<AuthContext | null> {
 export async function openUserSession(req: Request): Promise<AuthContext> {
   if (!mauthEnabledFlag()) return localDevAuth();
   const user = await userTokenFromRequest(req);
-  if (!user) throw new AuthError(401, "Log in with mWorld");
+  if (!user) throw new AuthError(401, "Sign in required");
   return verifyUser(user, requestOrigin(req));
 }
 

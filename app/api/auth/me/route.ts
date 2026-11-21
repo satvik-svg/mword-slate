@@ -16,7 +16,7 @@ export async function GET(req: Request) {
       mauth_enabled: mauthEnabled(),
     };
     const res = Response.json(body);
-    if (!sessionFromRequest(req) && !mauthEnabled()) {
+    if (!sessionFromRequest(req)) {
       res.headers.set("Set-Cookie", sessionCookieHeader(signSession(auth)));
     }
     return res;
