@@ -132,6 +132,9 @@ export type ImageElement = BaseElement & {
   mask: FrameMask;
   filters: ImageFilters;
   crop?: ImageCrop;
+  cropZoom?: number; // 1-3, default 1
+  cropOffsetX?: number; // -50 to 50 (% of frame width)
+  cropOffsetY?: number; // -50 to 50 (% of frame height)
   stroke?: string;
   strokeWidth?: number;
 };
