@@ -308,7 +308,7 @@ export function ShareModal({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addPerson()}
-              placeholder="teammate@mworld.cloud"
+              placeholder="teammate@company.com"
               className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--fg)] outline-none focus:border-[var(--accent)]"
             />
             <select

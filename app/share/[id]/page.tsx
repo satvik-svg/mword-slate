@@ -86,7 +86,7 @@ export default function ShareDesignPage({
         <SlateMark size={40} />
         <h1 className="text-lg font-bold text-[var(--fg)]">{error || "Design not accessible"}</h1>
         <p className="max-w-sm text-xs text-[var(--muted)]">
-          If this design was shared with your mWorld email, sign in to view or edit it.
+          If this design was shared with your account, sign in to view or edit it.
         </p>
         <div className="flex gap-2">
           {!user && (
@@ -94,7 +94,7 @@ export default function ShareDesignPage({
               onClick={() => void login()}
               className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-medium text-[var(--accent-fg)] cursor-pointer"
             >
-              Log in with mWorld
+              Sign in to view
             </button>
           )}
           <Link
