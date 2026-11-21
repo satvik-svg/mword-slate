@@ -1,10 +1,15 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { SlateMark } from "@/components/slate-logo";
 
 function AuthCallbackInner() {
+  const startedRef = useRef(false);
+
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+
     const params = new URLSearchParams(window.location.search);
     const success = params.get("success");
     const token = params.get("token") ?? params.get("user_access_token");

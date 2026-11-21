@@ -1,5 +1,15 @@
 import "server-only";
 
+import {
+  buildMAuthGenUrl,
+  buildMAuthUserUrl,
+  DEFAULT_MAUTH_API_URL,
+  extractMAuthUserIdentity,
+  normalizeMAuthOptions,
+  readMAuthOptionsFromEnv,
+  validateMAuthLink,
+  type MAuthOptionsInput,
+} from "@/lib/mauth";
 import { readCookie, readSessionToken, SESSION_COOKIE, type SessionClaims } from "@/lib/session";
 import { tenantFromIdentity } from "@/lib/tenant";
 
@@ -26,7 +36,7 @@ function mauthEnabledFlag(): boolean {
 }
 
 function mauthApiUrl(): string {
-  return (process.env.MAUTH_API_URL ?? "https://api.mauth.mworld.cloud").replace(/\/$/, "");
+  return (process.env.MAUTH_API_URL ?? DEFAULT_MAUTH_API_URL).replace(/\/$/, "");
 }
 
 function mauthVerifyUrl(): string {
@@ -35,33 +45,6 @@ function mauthVerifyUrl(): string {
 
 function pickString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function biIdFromUnknown(value: unknown): string {
-  if (!value || typeof value !== "object") return "";
-  const record = value as Record<string, unknown>;
-  return (
-    pickString(record.bi_id) ||
-    pickString(record.biId) ||
-    pickString(record.business_id) ||
-    pickString(record.businessId)
-  );
-}
-
-function businessId(value: unknown): string {
-  const direct = biIdFromUnknown(value);
-  if (direct) return direct;
-  if (!value || typeof value !== "object") return "";
-  const record = value as Record<string, unknown>;
-  const lists = [record.businesses, record.bi_list, record.business_list];
-  for (const list of lists) {
-    if (!Array.isArray(list)) continue;
-    for (const item of list) {
-      const id = typeof item === "string" ? item.trim() : biIdFromUnknown(item);
-      if (id) return id;
-    }
-  }
-  return "";
 }
 
 export function getTokenFromRequest(req: Request) {
@@ -147,15 +130,19 @@ export async function userTokenFromRequest(req: Request): Promise<string> {
   );
 }
 
-async function verifyUser(token: string, origin: string): Promise<AuthContext> {
-  const payload = {
+async function verifyUser(
+  token: string,
+  origin: string,
+  biIdOverride?: string | null,
+): Promise<AuthContext> {
+  const configuredBiId =
+    (biIdOverride !== undefined ? biIdOverride : readMAuthOptionsFromEnv()?.bi_id)?.trim() ?? "";
+  const url = buildMAuthUserUrl({
+    apiUrl: mauthApiUrl(),
+    token,
     origin,
-    required_user_data: ["email"],
-    optional_user_data: ["fullName", "phone", "citizen_id"],
-  };
-  const url =
-    `${mauthApiUrl()}/mAuthUser/${encodeURIComponent(token)}` +
-    `?payload=${encodeURIComponent(JSON.stringify(payload))}`;
+    bi_id: configuredBiId || undefined,
+  });
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
   const body = await response.json().catch(() => null);
   if (
@@ -169,28 +156,20 @@ async function verifyUser(token: string, origin: string): Promise<AuthContext> {
         : "";
     throw new AuthError(401, message || "Invalid mAuth session");
   }
-  const record = (body ?? {}) as Record<string, unknown>;
-  const user =
-    (record.user_data as Record<string, unknown> | undefined) ??
-    (record.data as Record<string, unknown> | undefined) ??
-    (record.user as Record<string, unknown> | undefined) ??
-    record;
-  const email = pickString(user.email);
-  const citizenId = pickString(user.citizen_id) || pickString(user.id);
+  const identity = extractMAuthUserIdentity(body, configuredBiId || undefined);
   const biId = tenantFromIdentity({
-    biId: businessId(record.bi_data) || businessId(user) || businessId(record),
-    email,
-    citizenId,
+    biId: identity.businessId,
+    email: identity.email,
+    citizenId: identity.citizenId,
   });
   if (!biId) {
     throw new AuthError(401, "mAuth returned no identity");
   }
-  const fullName = pickString(user.fullName) || pickString(user.full_name);
   return {
     biId,
-    personKey: email || citizenId || biId,
-    displayName: fullName || email || "You",
-    email,
+    personKey: identity.email || identity.citizenId || biId,
+    displayName: identity.fullName || identity.email || "You",
+    email: identity.email,
     entityType: "user",
   };
 }
@@ -242,20 +221,23 @@ export function jsonError(error: unknown) {
   return Response.json({ error: message }, { status: 500 });
 }
 
-export async function createAuthLink(origin: string, fresh = false): Promise<string> {
-  const params = new URLSearchParams({ origin, type: "native" });
-  if (fresh) {
-    params.set("prompt", "select_account");
-    params.set("force", "true");
-  }
-  const url = `${mauthApiUrl()}/mAuthGen?${params.toString()}`;
-  const res = await fetch(url, { cache: "no-store" });
-  const data = (await res.json().catch(() => null)) as { mAuth?: { auth_link?: string } } | null;
-  const link = data?.mAuth?.auth_link;
-  if (!res.ok || !link) throw new Error("mAuth did not return auth_link");
-  const parsed = new URL(link);
-  if (parsed.protocol !== "https:" || !parsed.hostname.endsWith("mworld.cloud")) {
-    throw new Error("mAuth did not return auth_link");
-  }
-  return parsed.toString();
+export async function createAuthLink(
+  origin: string,
+  fresh = false,
+  optionsOverride?: MAuthOptionsInput | null,
+): Promise<string> {
+  const options =
+    optionsOverride !== undefined
+      ? normalizeMAuthOptions(optionsOverride)
+      : readMAuthOptionsFromEnv();
+  const url = buildMAuthGenUrl({
+    apiUrl: mauthApiUrl(),
+    origin,
+    options,
+    fresh,
+  });
+  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error("mAuth did not return auth_link");
+  return validateMAuthLink(data);
 }

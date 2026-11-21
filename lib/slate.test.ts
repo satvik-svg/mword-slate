@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  buildMAuthGenUrl,
+  buildMAuthUserPayload,
+  buildMAuthUserUrl,
+  extractMAuthUserIdentity,
+  normalizeMAuthOptions,
+  readMAuthOptionsFromEnv,
+  validateMAuthLink,
+} from "./mauth";
 import { magicResizePages } from "./resize";
 import { readSessionToken, signSession } from "./session";
 import { BUILTIN_TEMPLATES, instantiateTemplate } from "./templates";
@@ -1230,6 +1239,209 @@ test("Collab sync strips large base64 images into compact refs, rehydrates from 
   assert.equal(parts.length, 3);
   assert.equal(parts.join(""), payload);
 });
+
+test("Native mAuth /mAuthGen omits options param for standalone apps and encodes non-empty options for business/branded apps", () => {
+  // Standalone: no options, empty object, or whitespace-only values all omit `options`
+  for (const emptyOpt of [
+    undefined,
+    null,
+    {},
+    { app_name: "", bi_id: "   ", logo_url: undefined },
+  ]) {
+    const raw = buildMAuthGenUrl({
+      origin: "https://slate.laflabs-tech.workers.dev",
+      options: emptyOpt,
+    });
+    assert.ok(raw.includes("origin=https%3A%2F%2Fslate.laflabs-tech.workers.dev"));
+    assert.ok(raw.includes("type=native"));
+    assert.equal(raw.includes("options="), false);
+    const parsed = new URL(raw);
+    assert.equal(parsed.pathname, "/mAuthGen");
+    assert.equal(parsed.searchParams.get("origin"), "https://slate.laflabs-tech.workers.dev");
+    assert.equal(parsed.searchParams.get("type"), "native");
+    assert.equal(parsed.searchParams.has("options"), false);
+  }
+
+  // Fresh prompt support preserves omission of options
+  const freshStandalone = new URL(
+    buildMAuthGenUrl({ origin: "https://slate.laflabs-tech.workers.dev", fresh: true }),
+  );
+  assert.equal(freshStandalone.searchParams.get("prompt"), "select_account");
+  assert.equal(freshStandalone.searchParams.get("force"), "true");
+  assert.equal(freshStandalone.searchParams.has("options"), false);
+
+  // Business app: includes all three fields, trimmed and URL-encoded as JSON
+  const brandedRaw = buildMAuthGenUrl({
+    origin: "https://app.example.com",
+    options: {
+      app_name: "  My Store  ",
+      bi_id: " bi-98765 ",
+      logo_url: "https://branding.mworld.cloud/api/public/logos/store.png",
+    },
+  });
+  assert.ok(brandedRaw.includes("options=%7B"));
+  const brandedUrl = new URL(brandedRaw);
+  assert.deepEqual(JSON.parse(brandedUrl.searchParams.get("options") ?? "{}"), {
+    app_name: "My Store",
+    bi_id: "bi-98765",
+    logo_url: "https://branding.mworld.cloud/api/public/logos/store.png",
+  });
+
+  // Partial options: drops empty/undefined keys so JSON never contains blank fields
+  const partialUrl = new URL(
+    buildMAuthGenUrl({
+      origin: "https://slate.laflabs-tech.workers.dev",
+      options: { app_name: "Slate", bi_id: "  ", logo_url: "" },
+    }),
+  );
+  const partialJson = JSON.parse(partialUrl.searchParams.get("options") ?? "{}");
+  assert.deepEqual(partialJson, { app_name: "Slate" });
+  assert.equal("bi_id" in partialJson, false);
+  assert.equal("logo_url" in partialJson, false);
+
+  // Environment reader: empty env -> undefined, populated env -> normalized options
+  assert.equal(readMAuthOptionsFromEnv({}), undefined);
+  assert.equal(
+    readMAuthOptionsFromEnv({ MAUTH_APP_NAME: "  ", MAUTH_BI_ID: "", MAUTH_LOGO_URL: undefined }),
+    undefined,
+  );
+  assert.deepEqual(
+    readMAuthOptionsFromEnv({
+      MAUTH_APP_NAME: "Acme Studio",
+      MAUTH_BI_ID: "bi-acme",
+      MAUTH_LOGO_URL: "https://branding.mworld.cloud/api/public/logos/acme.png",
+    }),
+    {
+      app_name: "Acme Studio",
+      bi_id: "bi-acme",
+      logo_url: "https://branding.mworld.cloud/api/public/logos/acme.png",
+    },
+  );
+  assert.equal(normalizeMAuthOptions({ bi_id: "" }), undefined);
+});
+
+test("Native mAuth /mAuthUser URL-encodes token & payload and makes bi_id strictly optional", () => {
+  // Standalone user verification: no bi_id key in payload
+  const standalonePayload = buildMAuthUserPayload({
+    origin: "https://slate.laflabs-tech.workers.dev",
+    bi_id: "   ",
+  });
+  assert.deepEqual(standalonePayload, {
+    origin: "https://slate.laflabs-tech.workers.dev",
+    required_user_data: ["fullName", "email", "phone"],
+  });
+  assert.equal("bi_id" in standalonePayload, false);
+
+  const standaloneRaw = buildMAuthUserUrl({
+    token: "tok/123+abc=xyz",
+    origin: "https://slate.laflabs-tech.workers.dev",
+  });
+  const standaloneUrl = new URL(standaloneRaw);
+  assert.equal(standaloneUrl.pathname, "/mAuthUser/tok%2F123%2Babc%3Dxyz");
+  const decodedStandalone = JSON.parse(standaloneUrl.searchParams.get("payload") ?? "{}");
+  assert.deepEqual(decodedStandalone, {
+    origin: "https://slate.laflabs-tech.workers.dev",
+    required_user_data: ["fullName", "email", "phone"],
+  });
+  assert.equal("bi_id" in decodedStandalone, false);
+
+  // Business app verification: keeps bi_id consistent with /mAuthGen
+  const businessEnv = readMAuthOptionsFromEnv({
+    MAUTH_APP_NAME: "Market App",
+    MAUTH_BI_ID: "bi-4242",
+    MAUTH_LOGO_URL: "https://branding.mworld.cloud/api/public/logos/m.png",
+  });
+  assert.ok(businessEnv?.bi_id);
+
+  const genUrl = new URL(
+    buildMAuthGenUrl({ origin: "https://market.mworld.cloud", options: businessEnv }),
+  );
+  const userUrl = new URL(
+    buildMAuthUserUrl({
+      token: "tok/biz+1",
+      origin: "https://market.mworld.cloud",
+      bi_id: businessEnv.bi_id,
+    }),
+  );
+  const genOpts = JSON.parse(genUrl.searchParams.get("options") ?? "{}") as Record<string, string>;
+  const userPayload = JSON.parse(userUrl.searchParams.get("payload") ?? "{}") as Record<
+    string,
+    unknown
+  >;
+  assert.equal(genOpts.bi_id, "bi-4242");
+  assert.equal(userPayload.bi_id, genOpts.bi_id);
+  assert.deepEqual(userPayload.required_user_data, ["fullName", "email", "phone"]);
+  assert.equal(userUrl.pathname, "/mAuthUser/tok%2Fbiz%2B1");
+});
+
+test("Native mAuth link validation and user identity extraction work for both standalone and business flows", () => {
+  assert.equal(
+    validateMAuthLink({ mAuth: { auth_link: "https://accounts.mworld.cloud/e?a=abc123" } }),
+    "https://accounts.mworld.cloud/e?a=abc123",
+  );
+  assert.throws(() => validateMAuthLink({ mAuth: { auth_link: "https://evil.example.com/e" } }));
+  assert.throws(() => validateMAuthLink({ mAuth: {} }));
+
+  // Standalone user response (no bi_id anywhere)
+  const standaloneIdentity = extractMAuthUserIdentity({
+    success: true,
+    user_data: {
+      fullName: "Asha Rao",
+      email: "Asha@MWorld.Cloud",
+      phone: "+919999999999",
+      citizen_id: "cit-101",
+    },
+  });
+  assert.equal(standaloneIdentity.businessId, "");
+  assert.equal(standaloneIdentity.fullName, "Asha Rao");
+  assert.equal(standaloneIdentity.phone, "+919999999999");
+  assert.equal(
+    tenantFromIdentity({
+      biId: standaloneIdentity.businessId,
+      email: standaloneIdentity.email,
+      citizenId: standaloneIdentity.citizenId,
+    }),
+    "personal:asha@mworld.cloud",
+  );
+
+  // Business app response with bi_data
+  const bizIdentity = extractMAuthUserIdentity(
+    {
+      success: true,
+      bi_data: { bi_id: "bi-shop-7" },
+      user_data: {
+        fullName: "Ravi Kumar",
+        email: "ravi@shop.com",
+        phone: "+918888888888",
+        citizen_id: "cit-202",
+      },
+    },
+    "bi-shop-7",
+  );
+  assert.equal(bizIdentity.businessId, "bi-shop-7");
+  assert.equal(
+    tenantFromIdentity({
+      biId: bizIdentity.businessId,
+      email: bizIdentity.email,
+      citizenId: bizIdentity.citizenId,
+    }),
+    "bi-shop-7",
+  );
+
+  // Business app fallback when mAuth omits bi_data but app is configured with bi_id
+  const bizFallback = extractMAuthUserIdentity(
+    {
+      success: true,
+      user_data: {
+        fullName: "Maya",
+        email: "maya@shop.com",
+      },
+    },
+    "bi-configured-9",
+  );
+  assert.equal(bizFallback.businessId, "bi-configured-9");
+});
+
 
 
 

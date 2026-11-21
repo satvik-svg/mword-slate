@@ -31,6 +31,8 @@
     "MAUTH_ENABLED": "true",
     "MAUTH_API_URL": "https://api.mauth.mworld.cloud",
     "MAUTH_VERIFY_URL": "https://api.mauth.mworld.cloud/mAuthAG/verifyToken",
-    "APP_ORIGIN": "https://slate.laflabs-tech.workers.dev"
+    "APP_ORIGIN": "https://slate.laflabs-tech.workers.dev",
+    "MAUTH_APP_NAME": "Slate",
+    "MAUTH_LOGO_URL": "https://slate.laflabs-tech.workers.dev/icon.svg"
   }
 }
