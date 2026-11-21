@@ -4,9 +4,11 @@ import {
   buildMAuthGenUrl,
   buildMAuthUserPayload,
   buildMAuthUserUrl,
+  DEFAULT_MAUTH_BI_ID,
   extractMAuthUserIdentity,
   normalizeMAuthOptions,
   readMAuthOptionsFromEnv,
+  resolveSlateMAuthOptions,
   validateMAuthLink,
 } from "./mauth";
 import { magicResizePages } from "./resize";
@@ -1404,7 +1406,7 @@ test("Native mAuth link validation and user identity extraction work for both st
     "personal:asha@mworld.cloud",
   );
 
-  // Business app response with bi_data
+  // Real user business workspace (distinct from standalone app bi_id) is preserved
   const bizIdentity = extractMAuthUserIdentity(
     {
       success: true,
@@ -1416,7 +1418,7 @@ test("Native mAuth link validation and user identity extraction work for both st
         citizen_id: "cit-202",
       },
     },
-    "bi-shop-7",
+    DEFAULT_MAUTH_BI_ID,
   );
   assert.equal(bizIdentity.businessId, "bi-shop-7");
   assert.equal(
@@ -1428,18 +1430,88 @@ test("Native mAuth link validation and user identity extraction work for both st
     "bi-shop-7",
   );
 
-  // Business app fallback when mAuth omits bi_data but app is configured with bi_id
-  const bizFallback = extractMAuthUserIdentity(
+  // Echoed standalone app MAUTH_BI_ID does NOT collapse distinct users into one workspace
+  const aliceIdentity = extractMAuthUserIdentity(
     {
       success: true,
+      bi_data: { bi_id: DEFAULT_MAUTH_BI_ID },
       user_data: {
-        fullName: "Maya",
-        email: "maya@shop.com",
+        fullName: "Alice",
+        email: "alice@example.com",
       },
     },
-    "bi-configured-9",
+    DEFAULT_MAUTH_BI_ID,
   );
-  assert.equal(bizFallback.businessId, "bi-configured-9");
+  const bobIdentity = extractMAuthUserIdentity(
+    {
+      success: true,
+      bi_data: { bi_id: DEFAULT_MAUTH_BI_ID },
+      user_data: {
+        fullName: "Bob",
+        email: "bob@example.com",
+      },
+    },
+    DEFAULT_MAUTH_BI_ID,
+  );
+  assert.equal(aliceIdentity.businessId, "");
+  assert.equal(bobIdentity.businessId, "");
+  assert.equal(
+    tenantFromIdentity({ biId: aliceIdentity.businessId, email: aliceIdentity.email }),
+    "personal:alice@example.com",
+  );
+  assert.equal(
+    tenantFromIdentity({ biId: bobIdentity.businessId, email: bobIdentity.email }),
+    "personal:bob@example.com",
+  );
+});
+
+test("Slate standalone Native mAuth uses one static MWORLD bi_id consistently across /mAuthGen and /mAuthUser", () => {
+  assert.match(
+    DEFAULT_MAUTH_BI_ID,
+    /^bi-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[A-Z][a-z]{2}\d{4}$/,
+  );
+
+  const origin = "https://slate.laflabs-tech.workers.dev";
+  const first = resolveSlateMAuthOptions(origin, {});
+  const second = resolveSlateMAuthOptions(origin, {});
+  assert.deepEqual(first, second);
+  assert.equal(first.bi_id, DEFAULT_MAUTH_BI_ID);
+  assert.equal(first.app_name, "Slate");
+  assert.equal(first.logo_url, "https://slate.laflabs-tech.workers.dev/icon.svg");
+
+  // Both /mAuthGen and /mAuthUser send the exact same app bi_id
+  const genUrl = new URL(buildMAuthGenUrl({ origin, options: first }));
+  const userUrl = new URL(
+    buildMAuthUserUrl({ token: "tok/abc+1", origin, bi_id: first.bi_id }),
+  );
+  const genOptions = JSON.parse(genUrl.searchParams.get("options") ?? "{}") as Record<
+    string,
+    string
+  >;
+  const userPayload = JSON.parse(userUrl.searchParams.get("payload") ?? "{}") as Record<
+    string,
+    unknown
+  >;
+  assert.deepEqual(genOptions, {
+    app_name: "Slate",
+    bi_id: DEFAULT_MAUTH_BI_ID,
+    logo_url: "https://slate.laflabs-tech.workers.dev/icon.svg",
+  });
+  assert.deepEqual(userPayload, {
+    origin,
+    required_user_data: ["fullName", "email", "phone"],
+    bi_id: DEFAULT_MAUTH_BI_ID,
+  });
+  assert.equal(userPayload.bi_id, genOptions.bi_id);
+
+  // Environment override MAUTH_BI_ID is respected consistently
+  const overridden = resolveSlateMAuthOptions(origin, {
+    MAUTH_APP_NAME: "Custom Slate",
+    MAUTH_BI_ID: "bi-18cd5fbf-9afc-488a-87aa-95284927ff05Nov2026",
+    MAUTH_LOGO_URL: "https://branding.mworld.cloud/api/public/logos/custom.png",
+  });
+  assert.equal(overridden.bi_id, "bi-18cd5fbf-9afc-488a-87aa-95284927ff05Nov2026");
+  assert.equal(overridden.app_name, "Custom Slate");
 });
 
 

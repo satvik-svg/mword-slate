@@ -1,5 +1,14 @@
 export const DEFAULT_MAUTH_API_URL = "https://api.mauth.mworld.cloud";
 
+export const DEFAULT_MAUTH_APP_NAME = "Slate";
+
+/**
+ * Single static MWORLD app identifier (`bi-<uuid><MonYYYY>`) generated once for Slate.
+ * Sent consistently in both `/mAuthGen` (`options.bi_id`) and `/mAuthUser/{token}` (`payload.bi_id`).
+ * Can be overridden via the `MAUTH_BI_ID` environment variable; never generated per request.
+ */
+export const DEFAULT_MAUTH_BI_ID = "bi-1c9dc4ca-012b-40c3-a44c-0cab72c20779Nov2026";
+
 export const DEFAULT_REQUIRED_USER_DATA = ["fullName", "email", "phone"] as const;
 
 export type MAuthOptionsInput = {
@@ -43,7 +52,7 @@ export function normalizeMAuthOptions(input?: MAuthOptionsInput | null): MAuthOp
 
 /**
  * Reads optional Native mAuth app metadata from environment variables.
- * Returns `undefined` when none are set (standalone apps).
+ * Returns `undefined` when none are set.
  */
 export function readMAuthOptionsFromEnv(
   env: Record<string, string | undefined> = process.env,
@@ -53,6 +62,24 @@ export function readMAuthOptionsFromEnv(
     bi_id: env.MAUTH_BI_ID,
     logo_url: env.MAUTH_LOGO_URL,
   });
+}
+
+/**
+ * Resolves Slate's static Native mAuth options (`app_name`, `bi_id`, `logo_url`)
+ * from environment variables with deterministic app-level fallbacks so `/mAuthGen`
+ * and `/mAuthUser/{token}` always send the exact same `bi_id`.
+ */
+export function resolveSlateMAuthOptions(
+  origin: string,
+  env: Record<string, string | undefined> = process.env,
+): Required<MAuthOptions> {
+  const cleanOrigin = trimNonEmpty(origin).replace(/\/$/, "");
+  return {
+    app_name: trimNonEmpty(env.MAUTH_APP_NAME) || DEFAULT_MAUTH_APP_NAME,
+    bi_id: trimNonEmpty(env.MAUTH_BI_ID) || DEFAULT_MAUTH_BI_ID,
+    logo_url:
+      trimNonEmpty(env.MAUTH_LOGO_URL) || (cleanOrigin ? `${cleanOrigin}/icon.svg` : "/icon.svg"),
+  };
 }
 
 /**
@@ -207,12 +234,13 @@ export type ExtractedMAuthIdentity = {
 
 /**
  * Extracts normalized identity fields from a `GET /mAuthUser/{token}` response.
- * Supports both standalone responses (no `bi_id`) and business responses (with `bi_data` / `bi_id`),
- * falling back to the app's configured `bi_id` when present.
+ * When `ignoreAppBiId` is provided (standalone app's static `MAUTH_BI_ID`), an echoed
+ * app-level `bi_id` is ignored as a workspace tenant so each user retains their own
+ * isolated personal workspace (`personal:<email>`).
  */
 export function extractMAuthUserIdentity(
   body: unknown,
-  configuredBiId?: string | null,
+  ignoreAppBiId?: string | null,
 ): ExtractedMAuthIdentity {
   const record = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const user =
@@ -227,11 +255,12 @@ export function extractMAuthUserIdentity(
   const fullName =
     pickString(user.fullName) || pickString(user.full_name) || pickString(user.name);
   const phone = pickString(user.phone) || pickString(user.phoneNumber);
-  const businessId =
+  const rawBusinessId =
     extractBusinessId(record.bi_data) ||
     extractBusinessId(user) ||
-    extractBusinessId(record) ||
-    trimNonEmpty(configuredBiId);
+    extractBusinessId(record);
+  const appBiId = trimNonEmpty(ignoreAppBiId);
+  const businessId = appBiId && rawBusinessId === appBiId ? "" : rawBusinessId;
 
   return {
     businessId,

@@ -6,7 +6,7 @@ import {
   DEFAULT_MAUTH_API_URL,
   extractMAuthUserIdentity,
   normalizeMAuthOptions,
-  readMAuthOptionsFromEnv,
+  resolveSlateMAuthOptions,
   validateMAuthLink,
   type MAuthOptionsInput,
 } from "@/lib/mauth";
@@ -135,13 +135,13 @@ async function verifyUser(
   origin: string,
   biIdOverride?: string | null,
 ): Promise<AuthContext> {
-  const configuredBiId =
-    (biIdOverride !== undefined ? biIdOverride : readMAuthOptionsFromEnv()?.bi_id)?.trim() ?? "";
+  const resolved = resolveSlateMAuthOptions(origin);
+  const appBiId = (biIdOverride !== undefined ? biIdOverride : resolved.bi_id)?.trim() ?? "";
   const url = buildMAuthUserUrl({
     apiUrl: mauthApiUrl(),
     token,
     origin,
-    bi_id: configuredBiId || undefined,
+    bi_id: appBiId || undefined,
   });
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
   const body = await response.json().catch(() => null);
@@ -156,7 +156,7 @@ async function verifyUser(
         : "";
     throw new AuthError(401, message || "Invalid mAuth session");
   }
-  const identity = extractMAuthUserIdentity(body, configuredBiId || undefined);
+  const identity = extractMAuthUserIdentity(body, appBiId || undefined);
   const biId = tenantFromIdentity({
     biId: identity.businessId,
     email: identity.email,
@@ -229,7 +229,7 @@ export async function createAuthLink(
   const options =
     optionsOverride !== undefined
       ? normalizeMAuthOptions(optionsOverride)
-      : readMAuthOptionsFromEnv();
+      : resolveSlateMAuthOptions(origin);
   const url = buildMAuthGenUrl({
     apiUrl: mauthApiUrl(),
     origin,
