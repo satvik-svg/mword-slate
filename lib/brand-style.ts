@@ -126,10 +126,61 @@ export function derivePaletteRoles(colors: string[], shuffleIndex = 0): PaletteR
   const secondary = accentPool[(shift + 1) % accentPool.length] ?? mixHex(accent, ink, 0.25);
 
   const card = mixHex(surface, accent, 0.06);
-  const darkCard = mixHex(ink, surface, 0.1);
+  const darkCard = mixHex(ink, surface, 0.14);
   const muted = mixHex(ink, surface, 0.45);
 
   return { ink, surface, card, darkCard, accent, secondary, muted };
+}
+
+/**
+ * Build a readable multi-color series palette for charts from brand colors.
+ */
+export function buildChartSeriesPalette(
+  colors: string[],
+  roles: PaletteRoles,
+  backdrop: string,
+): string[] {
+  const darkBackdrop = !isLightColor(backdrop);
+  const raw: string[] = [
+    roles.accent,
+    roles.secondary,
+    ...colors.filter((c) => parseHexColor(c) !== null),
+    mixHex(roles.accent, darkBackdrop ? "#FFFFFF" : roles.ink, 0.3),
+    mixHex(roles.secondary, darkBackdrop ? "#FFFFFF" : roles.ink, 0.32),
+    mixHex(roles.accent, roles.secondary, 0.5),
+    mixHex(roles.accent, darkBackdrop ? "#FFFFFF" : roles.surface, 0.52),
+  ];
+
+  const distinct: string[] = [];
+  for (const hex of raw) {
+    const norm = hex.toUpperCase();
+    if (distinct.includes(norm)) continue;
+    if (contrastRatio(backdrop, norm) < 1.8) continue;
+    distinct.push(norm);
+  }
+  if (distinct.length >= 4) return distinct;
+
+  const fallbackTarget = darkBackdrop ? "#FFFFFF" : "#111114";
+  const base = distinct[0] ?? roles.accent;
+  return [
+    base,
+    mixHex(base, fallbackTarget, 0.22),
+    mixHex(base, fallbackTarget, 0.42),
+    mixHex(base, fallbackTarget, 0.6),
+  ];
+}
+
+/**
+ * Derive stepped harmonious tones from a single brand swatch for recoloring charts.
+ */
+export function buildSwatchChartShades(swatchHex: string, count: number): string[] {
+  const light = isLightColor(swatchHex);
+  const target = light ? "#111114" : "#FFFFFF";
+  const stops = [0, 0.18, 0.34, 0.5, 0.64, 0.76];
+  return Array.from({ length: Math.max(1, count) }, (_, idx) => {
+    const t = stops[idx % stops.length];
+    return t === 0 ? swatchHex.toUpperCase() : mixHex(swatchHex, target, t);
+  });
 }
 
 function isContainerShape(
@@ -157,9 +208,10 @@ function isContainerShape(
   });
 
   if (containsText) {
-    // Small pill badges with text inside should keep accent styling, large cards stay subtle surfaces
+    // Small pill badges / CTA buttons with text inside should keep accent styling, large cards stay subtle surfaces
     const areaRatio = (shape.width * shape.height) / Math.max(1, pageWidth * pageHeight);
     const neutralFill = colorSaturation(fill) < 0.22;
+    if (shape.shape === "pill" && areaRatio < 0.08) return false;
     return areaRatio >= 0.06 || neutralFill;
   }
 
@@ -194,7 +246,7 @@ function findEnclosingShapeFill(
 
 export type ApplyStyleOptions = {
   colors?: string[];
-  fonts?: { heading: string; body: string };
+  fonts?: { heading: string; subheading?: string; body: string };
   applyColors?: boolean;
   applyFonts?: boolean;
   /** 0 = keep page polarity (light stays light, dark stays dark); 1 = tinted/accent variant; 2 = inverted dark/light */
@@ -208,7 +260,7 @@ export type ApplyStyleOptions = {
  * - Preserves background images and transparent strokes
  * - Keeps content cards readable instead of flooding them with neon accents
  * - Picks WCAG-contrasting text colors based on each text box's actual backdrop
- * - Restyles shapes, text, icons, tables, charts, and QR codes
+ * - Restyles shapes, text, icons, tables, charts, draw strokes, and QR codes
  */
 export function applyStyleToPage(page: DesignPage, opts: ApplyStyleOptions): DesignPage {
   const applyColors = opts.applyColors !== false && !!opts.colors?.length;
@@ -233,11 +285,15 @@ export function applyStyleToPage(page: DesignPage, opts: ApplyStyleOptions): Des
       nextGradTo = page.backgroundGradientTo
         ? originallyLight
           ? roles.card
-          : mixHex(roles.ink, roles.accent, 0.22)
+          : mixHex(roles.ink, roles.accent, 0.24)
         : undefined;
     } else if (variant === 1) {
       nextBg = originallyLight ? roles.card : mixHex(roles.ink, roles.accent, 0.18);
-      nextGradTo = page.backgroundGradientTo ? roles.surface : undefined;
+      nextGradTo = page.backgroundGradientTo
+        ? originallyLight
+          ? roles.surface
+          : mixHex(roles.ink, roles.secondary, 0.34)
+        : undefined;
     } else {
       // Variant 2: flip polarity for a high-contrast dark/light exploration
       nextBg = originallyLight ? roles.ink : roles.surface;
@@ -327,8 +383,14 @@ export function applyStyleToPage(page: DesignPage, opts: ApplyStyleOptions): Des
     if (el.type === "text") {
       const patch: Partial<typeof el> = {};
       if (applyFonts && opts.fonts) {
-        const isHeading = el.fontSize >= 28 || (el.fontSize >= 20 && el.fontWeight >= 600);
-        patch.fontFamily = isHeading ? opts.fonts.heading : opts.fonts.body;
+        const isHeading = el.fontSize >= 36 || (el.fontSize >= 28 && el.fontWeight >= 700);
+        const isSubheading =
+          !isHeading && (el.fontSize >= 22 || (el.fontSize >= 18 && el.fontWeight >= 600));
+        patch.fontFamily = isHeading
+          ? opts.fonts.heading
+          : isSubheading && opts.fonts.subheading
+            ? opts.fonts.subheading
+            : opts.fonts.body;
       }
       if (roles) {
         const enclosingFill = findEnclosingShapeFill(el, i, styledElements);
@@ -375,6 +437,20 @@ export function applyStyleToPage(page: DesignPage, opts: ApplyStyleOptions): Des
       continue;
     }
 
+    if (el.type === "draw") {
+      if (!roles) {
+        styledElements.push(el);
+        continue;
+      }
+      const backdrop = findEnclosingShapeFill(el, i, styledElements) ?? (hasBgImage ? "#FFFFFF" : nextBg);
+      const strokeColor =
+        contrastRatio(backdrop, roles.accent) >= 2.5
+          ? roles.accent
+          : pickContrastingText(backdrop, roles.ink, "#FFFFFF");
+      styledElements.push({ ...el, color: strokeColor });
+      continue;
+    }
+
     if (el.type === "table") {
       styledElements.push({
         ...el,
@@ -404,10 +480,15 @@ export function applyStyleToPage(page: DesignPage, opts: ApplyStyleOptions): Des
         continue;
       }
       const backdrop = findEnclosingShapeFill(el, i, styledElements) ?? nextBg;
+      const series = buildChartSeriesPalette(opts.colors ?? [], roles, backdrop);
       styledElements.push({
         ...el,
-        accentColor: roles.accent,
+        accentColor: series[0] ?? roles.accent,
         textColor: pickContrastingText(backdrop, roles.ink, "#FFFFFF"),
+        data: el.data.map((item, idx) => ({
+          ...item,
+          color: series[idx % series.length],
+        })),
       });
       continue;
     }
