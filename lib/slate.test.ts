@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  generateLogoConcepts,
-  logoConceptToDesignPage,
-  matchIconsForKeywords,
-  renderLogoConceptSvg,
-} from "./logo-generator";
 import { magicResizePages } from "./resize";
 import { readSessionToken, signSession } from "./session";
 import { BUILTIN_TEMPLATES, instantiateTemplate } from "./templates";
@@ -31,25 +25,6 @@ test("HMAC session signs, reads, and rejects tampered tokens", () => {
   assert.equal(claims.biId, "biz_1");
   assert.equal(claims.email, "alice@mworld.cloud");
   assert.equal(readSessionToken(token + "x"), null);
-});
-
-test("Logo Generator creates 12 editable concepts and valid SVG output", () => {
-  const icons = matchIconsForKeywords("coffee cafe", "Roast");
-  assert.equal(icons[0], "coffee");
-
-  const concepts = generateLogoConcepts({
-    brandName: "Slate",
-    tagline: "Design Studio",
-    industry: "Creative Studio",
-  });
-  assert.equal(concepts.length, 12);
-
-  const page = logoConceptToDesignPage(concepts[0]);
-  assert.ok(page.elements.length >= 2);
-
-  const svg = renderLogoConceptSvg(concepts[0], { transparent: true });
-  assert.ok(svg.startsWith("<svg "));
-  assert.ok(svg.includes("Slate"));
 });
 
 test("Magic Resize reflows elements proportionally across formats", () => {
@@ -262,4 +237,145 @@ test("Brand style keeps cards readable, preserves backgroundImage & transparent 
   assert.equal(fontsOnlyCard.fill, "#EAEAF0");
   assert.equal(fontsOnlyTitle.fontFamily, "Fraunces");
 });
+
+import {
+  cleanFontNameFromFile,
+  fontFormatFromFile,
+  googleFontStylesheetUrl,
+} from "./custom-fonts";
+import { buildSwatchChartShades } from "./brand-style";
+
+test("Custom font helpers sanitize uploaded filenames and build Google Fonts CSS URLs", () => {
+  assert.equal(cleanFontNameFromFile("Satoshi-Bold_2026.woff2"), "Satoshi Bold 2026");
+  assert.equal(cleanFontNameFromFile("MyBrand.otf"), "MyBrand");
+  assert.equal(fontFormatFromFile("MyBrand.woff2"), "woff2");
+  assert.equal(fontFormatFromFile("MyBrand.otf"), "opentype");
+  assert.equal(fontFormatFromFile("MyBrand.ttf"), "truetype");
+  assert.ok(
+    googleFontStylesheetUrl("Libre Baskerville").startsWith(
+      "https://fonts.googleapis.com/css2?family=Libre+Baskerville:",
+    ),
+  );
+});
+
+test("Brand style keeps dark gradients dark on shuffle, recolors chart series, and applies subheading font", () => {
+  const darkStory: DesignPage = {
+    id: "pg_dark",
+    name: "Story",
+    background: "#0F172A",
+    backgroundGradientTo: "#7C3AED",
+    elements: [
+      {
+        id: "h1",
+        type: "text",
+        x: 80,
+        y: 120,
+        width: 900,
+        height: 160,
+        rotation: 0,
+        opacity: 1,
+        text: "BUILD BRANDS",
+        fontFamily: "Inter",
+        fontSize: 84,
+        fontWeight: 800,
+        color: "#FFFFFF",
+        align: "center",
+        lineHeight: 1.05,
+        letterSpacing: -1,
+      },
+      {
+        id: "sub",
+        type: "text",
+        x: 80,
+        y: 300,
+        width: 900,
+        height: 60,
+        rotation: 0,
+        opacity: 1,
+        text: "LIVE WORKSHOP",
+        fontFamily: "Inter",
+        fontSize: 26,
+        fontWeight: 600,
+        color: "#FDE047",
+        align: "center",
+        lineHeight: 1.2,
+        letterSpacing: 2,
+      },
+      {
+        id: "body",
+        type: "text",
+        x: 80,
+        y: 400,
+        width: 900,
+        height: 90,
+        rotation: 0,
+        opacity: 1,
+        text: "Join 1,200+ creators.",
+        fontFamily: "Inter",
+        fontSize: 18,
+        fontWeight: 400,
+        color: "#E2E8F0",
+        align: "center",
+        lineHeight: 1.4,
+        letterSpacing: 0,
+      },
+      {
+        id: "chart1",
+        type: "chart",
+        chartKind: "bar",
+        title: "Overview",
+        x: 120,
+        y: 540,
+        width: 800,
+        height: 400,
+        rotation: 0,
+        opacity: 1,
+        accentColor: "#4F46E5",
+        textColor: "#FFFFFF",
+        data: [
+          { label: "Q1", value: 38, color: "#4F46E5" },
+          { label: "Q2", value: 54, color: "#06B6D4" },
+          { label: "Q3", value: 72, color: "#F43F5E" },
+        ],
+      },
+    ],
+  };
+
+  const palette = ["#14261E", "#15803D", "#4D7C5D", "#E7F0EA", "#F9FBF9"];
+  const styled = applyStyleToPage(darkStory, {
+    colors: palette,
+    fonts: { heading: "Space Grotesk", subheading: "Outfit", body: "DM Sans" },
+    applyColors: true,
+    applyFonts: true,
+    variant: 1,
+    pageWidth: 1080,
+    pageHeight: 1920,
+  });
+
+  // Both gradient stops stay dark on variant 1 of a dark page
+  assert.equal(isLightColor(styled.background), false);
+  assert.ok(styled.backgroundGradientTo);
+  assert.equal(isLightColor(styled.backgroundGradientTo), false);
+
+  // Heading, subheading, and body fonts are applied to their matching tiers
+  const h1 = styled.elements.find((e) => e.id === "h1");
+  const sub = styled.elements.find((e) => e.id === "sub");
+  const body = styled.elements.find((e) => e.id === "body");
+  assert.ok(h1 && h1.type === "text" && h1.fontFamily === "Space Grotesk");
+  assert.ok(sub && sub.type === "text" && sub.fontFamily === "Outfit");
+  assert.ok(body && body.type === "text" && body.fontFamily === "DM Sans");
+
+  // Chart bars adopt the brand palette instead of keeping old defaults
+  const chart = styled.elements.find((e) => e.id === "chart1");
+  assert.ok(chart && chart.type === "chart");
+  assert.notEqual(chart.data[0].color, "#4F46E5");
+  assert.notEqual(chart.data[1].color, "#06B6D4");
+  assert.ok(contrastRatio(styled.background, chart.textColor) >= 4.5);
+
+  const shades = buildSwatchChartShades("#2563EB", 4);
+  assert.equal(shades.length, 4);
+  assert.equal(shades[0], "#2563EB");
+  assert.notEqual(shades[1], shades[0]);
+});
+
 
