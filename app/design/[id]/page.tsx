@@ -3,7 +3,8 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { SignInGate, useAuth } from "@/components/auth-provider";
+import { useAuth } from "@/components/auth-provider";
+import { LoginView } from "@/components/login-view";
 import { SlateMark } from "@/components/slate-logo";
 import type { RailTab } from "@/components/studio/left-rail";
 import { StudioEditor } from "@/components/studio/studio-editor";
@@ -49,7 +50,7 @@ export default function DesignPageRoute({
     );
   }
 
-  if (!user) return <SignInGate />;
+  if (!user) return <LoginView showBackLink />;
 
   if (loading) {
     return (
