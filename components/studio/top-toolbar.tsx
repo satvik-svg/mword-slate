@@ -42,6 +42,7 @@ import { GOOGLE_FONTS } from "@/lib/presets";
 import type {
   CanvasElement,
   ChartElement,
+  CustomFontItem,
   DesignPage,
   IconElement,
   ImageElement,
@@ -79,6 +80,9 @@ export function TopToolbar({
   onPasteStyle,
   hasCopiedStyle,
   onOpenPhotoTab,
+  dataEditorOpen,
+  onToggleDataEditor,
+  customFonts,
 }: {
   title: string;
   onTitleChange: (title: string) => void;
@@ -107,6 +111,9 @@ export function TopToolbar({
   onPasteStyle: () => void;
   hasCopiedStyle: boolean;
   onOpenPhotoTab: () => void;
+  dataEditorOpen?: boolean;
+  onToggleDataEditor?: () => void;
+  customFonts?: CustomFontItem[];
 }) {
   const { theme, toggleTheme } = useAuth();
   const [helpOpen, setHelpOpen] = useState(false);
@@ -345,14 +352,26 @@ export function TopToolbar({
                   onChange={(e) => onUpdateElement(t.id, { fontFamily: e.target.value }, true)}
                   className="max-w-[150px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--fg)]"
                 >
-                  {!GOOGLE_FONTS.some((f) => f.name === t.fontFamily) && (
-                    <option value={t.fontFamily}>{t.fontFamily}</option>
+                  {!GOOGLE_FONTS.some((f) => f.name === t.fontFamily) &&
+                    !(customFonts ?? []).some((f) => f.name === t.fontFamily) && (
+                      <option value={t.fontFamily}>{t.fontFamily}</option>
+                    )}
+                  {customFonts && customFonts.length > 0 && (
+                    <optgroup label="Custom Fonts">
+                      {customFonts.map((f) => (
+                        <option key={f.id} value={f.name}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   )}
-                  {GOOGLE_FONTS.map((f) => (
-                    <option key={f.name} value={f.name}>
-                      {f.name}
-                    </option>
-                  ))}
+                  <optgroup label="Built-in Fonts">
+                    {GOOGLE_FONTS.map((f) => (
+                      <option key={f.name} value={f.name}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
 
                 <input
@@ -607,6 +626,17 @@ export function TopToolbar({
             return (
               <>
                 <button
+                  onClick={onToggleDataEditor}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-medium cursor-pointer ${
+                    dataEditorOpen
+                      ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]"
+                      : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--fg)] hover:bg-[var(--surface-2)]"
+                  }`}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  {dataEditorOpen ? "Hide Table Editor" : "Edit Table"}
+                </button>
+                <button
                   onClick={() =>
                     onUpdateElement(
                       tb.id,
@@ -648,6 +678,17 @@ export function TopToolbar({
             const ch = single as ChartElement;
             return (
               <>
+                <button
+                  onClick={onToggleDataEditor}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-medium cursor-pointer ${
+                    dataEditorOpen
+                      ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]"
+                      : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--fg)] hover:bg-[var(--surface-2)]"
+                  }`}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  {dataEditorOpen ? "Hide Chart Data" : "Edit Data"}
+                </button>
                 <select
                   value={ch.chartKind}
                   onChange={(e) =>
@@ -666,12 +707,15 @@ export function TopToolbar({
                   placeholder="Chart title"
                   className="w-36 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1"
                 />
-                <input
-                  type="color"
-                  value={ch.accentColor}
-                  onChange={(e) => onUpdateElement(ch.id, { accentColor: e.target.value } as Partial<ChartElement>)}
-                  className="h-6 w-6 cursor-pointer rounded"
-                />
+                <label className="inline-flex items-center gap-1" title="Label & title text color">
+                  Text
+                  <input
+                    type="color"
+                    value={ch.textColor || "#0F172A"}
+                    onChange={(e) => onUpdateElement(ch.id, { textColor: e.target.value } as Partial<ChartElement>, true)}
+                    className="h-6 w-6 cursor-pointer rounded"
+                  />
+                </label>
                 <button
                   onClick={() =>
                     onUpdateElement(
@@ -679,7 +723,7 @@ export function TopToolbar({
                       {
                         data: [
                           ...ch.data,
-                          { label: `Item ${ch.data.length + 1}`, value: Math.round(30 + Math.random() * 70) },
+                          { label: `Item ${ch.data.length + 1}`, value: 50 },
                         ],
                       } as Partial<ChartElement>,
                       true,
@@ -687,7 +731,7 @@ export function TopToolbar({
                   }
                   className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 cursor-pointer"
                 >
-                  <Plus className="h-3 w-3" /> Data Point
+                  <Plus className="h-3 w-3" /> Add Item
                 </button>
               </>
             );
