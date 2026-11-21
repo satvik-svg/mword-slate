@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronLeft,
@@ -8,17 +8,26 @@ import {
   Clock,
   Copy,
   Download,
+  Eraser,
+  FileArchive,
   FileText,
   History,
   Image as ImageIcon,
+  LayoutGrid,
   Link2,
   Maximize2,
   MessageSquare,
+  Pause,
+  PenTool,
+  Play,
   Plus,
+  Pointer,
   Presentation,
   RotateCcw,
   Send,
+  Sparkles,
   Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import { PagePreview } from "@/components/page-preview";
@@ -27,6 +36,8 @@ import {
   exportDesignAsPptx,
   exportPageAsImage,
   exportPageAsSvg,
+  exportPagesAsZip,
+  parsePageRange,
 } from "@/lib/exporter";
 import { FORMAT_PRESETS } from "@/lib/presets";
 import type {
@@ -66,39 +77,103 @@ export function ExportModal({
   height: number;
 }) {
   const [format, setFormat] = useState<"png" | "jpeg" | "svg" | "pdf" | "pptx">("png");
+  const [pageScope, setPageScope] = useState<"current" | "all" | "range">("current");
+  const [rangeText, setRangeText] = useState(`1-${pages.length}`);
   const [scale, setScale] = useState(2);
   const [transparentBg, setTransparentBg] = useState(false);
   const [quality, setQuality] = useState(0.92);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setRangeText(`1-${pages.length}`);
+      setProgress(null);
+    }
+  }, [open, pages.length]);
 
   useEscapeClose(open, onClose);
+
+  const selectedIndices = useMemo(() => {
+    if (pages.length <= 1) return [0];
+    if (pageScope === "current") {
+      return [Math.max(0, Math.min(pages.length - 1, activePageIndex))];
+    }
+    if (pageScope === "all") {
+      return pages.map((_, i) => i);
+    }
+    return parsePageRange(rangeText, pages.length);
+  }, [pages, pageScope, activePageIndex, rangeText]);
 
   if (!open) return null;
 
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "slate-design";
-  const page = pages[activePageIndex] ?? pages[0];
+  const selectedPages = selectedIndices.map((idx) => pages[idx]).filter(Boolean);
+  const willZip =
+    (format === "png" || format === "jpeg" || format === "svg") && selectedIndices.length > 1;
+
+  const handleSelectFormat = (next: typeof format) => {
+    setFormat(next);
+    if (pages.length > 1) {
+      if ((next === "pdf" || next === "pptx") && pageScope === "current") {
+        setPageScope("all");
+      } else if ((next === "png" || next === "jpeg" || next === "svg") && pageScope === "all") {
+        setPageScope("current");
+      }
+    }
+  };
 
   const handleDownload = async () => {
+    if (selectedPages.length === 0) return;
     setBusy(true);
+    setProgress(null);
     try {
       if (format === "png" || format === "jpeg") {
-        await exportPageAsImage(page, width, height, format, slug, {
-          scale,
-          transparentBg,
-          quality,
-        });
+        if (selectedIndices.length > 1) {
+          await exportPagesAsZip(pages, selectedIndices, width, height, format, slug, {
+            scale,
+            transparentBg,
+            quality,
+            onProgress: (current, total) => setProgress({ current, total }),
+          });
+        } else {
+          await exportPageAsImage(selectedPages[0], width, height, format, slug, {
+            scale,
+            transparentBg,
+            quality,
+          });
+        }
       } else if (format === "svg") {
-        exportPageAsSvg(page, width, height, slug, transparentBg);
+        if (selectedIndices.length > 1) {
+          await exportPagesAsZip(pages, selectedIndices, width, height, "svg", slug, {
+            transparentBg,
+            onProgress: (current, total) => setProgress({ current, total }),
+          });
+        } else {
+          exportPageAsSvg(selectedPages[0], width, height, slug, transparentBg);
+        }
       } else if (format === "pdf") {
-        await exportDesignAsPdf(pages, width, height, slug);
+        await exportDesignAsPdf(selectedPages, width, height, slug);
       } else if (format === "pptx") {
-        await exportDesignAsPptx(pages, width, height, slug);
+        await exportDesignAsPptx(selectedPages, width, height, slug);
       }
       onClose();
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
+
+  const formatLabel = format === "jpeg" ? "JPG" : format.toUpperCase();
+  const downloadCta = busy
+    ? progress
+      ? `Rendering ${progress.current} / ${progress.total}…`
+      : "Rendering…"
+    : willZip
+      ? `Download ${selectedPages.length} ${formatLabel}s (.zip)`
+      : format === "pdf" || format === "pptx"
+        ? `Download ${formatLabel} (${selectedPages.length} ${selectedPages.length === 1 ? "page" : "pages"})`
+        : `Download ${formatLabel}`;
 
   return (
     <div
@@ -133,7 +208,7 @@ export function ExportModal({
           ).map((f) => (
             <button
               key={f.id}
-              onClick={() => setFormat(f.id)}
+              onClick={() => handleSelectFormat(f.id)}
               className={`rounded-xl border py-2.5 text-xs font-bold transition cursor-pointer ${
                 format === f.id
                   ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
@@ -146,6 +221,61 @@ export function ExportModal({
         </div>
 
         <div className="mt-4 space-y-3 text-xs text-[var(--muted)]">
+          {/* Page Selection (shown when multi-page design) */}
+          {pages.length > 1 && (
+            <div>
+              <div className="flex items-center justify-between font-medium text-[var(--fg)]">
+                <span>Pages</span>
+                <span className="text-[11px] text-[var(--muted)]">
+                  {selectedPages.length} of {pages.length} selected
+                </span>
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                {(
+                  [
+                    { id: "current", label: `Page ${activePageIndex + 1}` },
+                    {
+                      id: "all",
+                      label:
+                        format === "png" || format === "jpeg" || format === "svg"
+                          ? `All (${pages.length}) .zip`
+                          : `All (${pages.length})`,
+                    },
+                    { id: "range", label: "Custom" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setPageScope(opt.id)}
+                    className={`rounded-lg border py-1.5 text-[11px] font-semibold cursor-pointer ${
+                      pageScope === opt.id
+                        ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]"
+                        : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)]"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {pageScope === "range" && (
+                <div className="mt-2">
+                  <input
+                    value={rangeText}
+                    onChange={(e) => setRangeText(e.target.value)}
+                    placeholder={`e.g. 1-3, ${pages.length}`}
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-xs text-[var(--fg)] outline-none focus:border-[var(--accent)]"
+                  />
+                  {selectedPages.length === 0 && (
+                    <p className="mt-1 text-[11px] text-rose-500">
+                      Enter page numbers between 1 and {pages.length} (e.g. 1-2, 4).
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {(format === "png" || format === "jpeg") && (
             <div>
               <div className="flex justify-between font-medium text-[var(--fg)]">
@@ -204,33 +334,39 @@ export function ExportModal({
 
           {format === "pdf" && (
             <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-2)] p-3 text-[var(--fg)]">
-              <FileText className="h-4 w-4 text-[var(--accent)]" />
-              Exports all {pages.length} page{pages.length > 1 ? "s" : ""} as a crisp multi-page PDF.
+              <FileText className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+              Exports {selectedPages.length} page{selectedPages.length !== 1 ? "s" : ""} as a crisp 2× PDF with selectable text.
             </div>
           )}
 
           {format === "pptx" && (
             <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-2)] p-3 text-[var(--fg)]">
-              <Presentation className="h-4 w-4 text-[var(--accent)]" />
-              Exports all {pages.length} slide{pages.length > 1 ? "s" : ""} as an editable PowerPoint (.pptx) file.
+              <Presentation className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+              Exports {selectedPages.length} slide{selectedPages.length !== 1 ? "s" : ""} as an editable PowerPoint (.pptx) deck.
             </div>
           )}
 
           {(format === "png" || format === "jpeg" || format === "svg") && (
             <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-2)] p-3">
-              <ImageIcon className="h-4 w-4 text-[var(--accent)]" />
-              Exports current page ({page?.name || `Page ${activePageIndex + 1}`}).
+              {willZip ? (
+                <FileArchive className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+              ) : (
+                <ImageIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+              )}
+              {willZip
+                ? `Bundles ${selectedPages.length} pages into a single numbered .zip archive.`
+                : `Exports ${selectedPages[0]?.name || `Page ${activePageIndex + 1}`}.`}
             </div>
           )}
         </div>
 
         <button
           onClick={handleDownload}
-          disabled={busy}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-[var(--accent-fg)] hover:opacity-95 disabled:opacity-60 cursor-pointer"
+          disabled={busy || selectedPages.length === 0}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-[var(--accent-fg)] hover:opacity-95 disabled:opacity-50 cursor-pointer"
         >
           <Download className="h-4 w-4" />
-          {busy ? "Rendering…" : `Download ${format.toUpperCase()}`}
+          {downloadCta}
         </button>
       </div>
     </div>
@@ -612,6 +748,19 @@ export function VersionHistoryModal({
   );
 }
 
+type PresenterStroke = {
+  color: string;
+  points: { x: number; y: number }[];
+};
+
+const PRESENTER_INK_COLORS = ["#F43F5E", "#FACC15", "#38BDF8", "#FFFFFF"];
+
+function formatElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 export function PresentOverlay({
   open,
   onClose,
@@ -628,12 +777,50 @@ export function PresentOverlay({
   height: number;
 }) {
   const [index, setIndex] = useState(initialIndex);
+  const [direction, setDirection] = useState<"next" | "prev">("next");
+  const [hasNavigated, setHasNavigated] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [showStrip, setShowStrip] = useState(false);
+  const [tool, setTool] = useState<"pointer" | "laser" | "draw">("pointer");
+  const [inkColor, setInkColor] = useState(PRESENTER_INK_COLORS[0]);
+  const [annotations, setAnnotations] = useState<Record<string, PresenterStroke[]>>({});
+  const [liveDraw, setLiveDraw] = useState<PresenterStroke | null>(null);
+  const [laserTrail, setLaserTrail] = useState<{ x: number; y: number; ts: number }[]>([]);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [timerPaused, setTimerPaused] = useState(false);
   const [viewport, setViewport] = useState({ w: 1280, h: 720 });
+  const slideFrameRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) setIndex(initialIndex);
+    if (open) {
+      setIndex(initialIndex);
+      setDirection("next");
+      setHasNavigated(false);
+      setTool("pointer");
+      setAnnotations({});
+      setLiveDraw(null);
+      setLaserTrail([]);
+      setElapsedSec(0);
+      setTimerPaused(false);
+    }
   }, [open, initialIndex]);
+
+  // Elapsed presentation timer
+  useEffect(() => {
+    if (!open || timerPaused) return;
+    const id = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [open, timerPaused]);
+
+  // Fade out laser trail points over ~350ms
+  useEffect(() => {
+    if (!open || tool !== "laser" || laserTrail.length === 0) return;
+    const id = window.setInterval(() => {
+      const cutoff = Date.now() - 360;
+      setLaserTrail((prev) => prev.filter((p) => p.ts >= cutoff));
+    }, 40);
+    return () => window.clearInterval(id);
+  }, [open, tool, laserTrail.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -642,8 +829,29 @@ export function PresentOverlay({
     window.addEventListener("resize", sync);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (e.key === "ArrowRight" || e.key === " ") setIndex((i) => Math.min(pages.length - 1, i + 1));
-      if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
+      if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        setDirection("next");
+        setHasNavigated(true);
+        setIndex((i) => Math.min(pages.length - 1, i + 1));
+      }
+      if (e.key === "ArrowLeft") {
+        setDirection("prev");
+        setHasNavigated(true);
+        setIndex((i) => Math.max(0, i - 1));
+      }
+      if (e.key.toLowerCase() === "l") {
+        setTool((t) => (t === "laser" ? "pointer" : "laser"));
+      }
+      if (e.key.toLowerCase() === "d") {
+        setTool((t) => (t === "draw" ? "pointer" : "draw"));
+      }
+      if (e.key.toLowerCase() === "g") {
+        setShowStrip((s) => !s);
+      }
+      if (e.key.toLowerCase() === "n") {
+        setShowNotes((s) => !s);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => {
@@ -654,58 +862,366 @@ export function PresentOverlay({
 
   if (!open) return null;
   const page = pages[index] ?? pages[0];
+  const extraChromeH = (showNotes ? 96 : 0) + (showStrip ? 96 : 0);
   const maxW = viewport.w - 80;
-  const maxH = viewport.h - (showNotes ? 200 : 110);
+  const maxH = Math.max(200, viewport.h - 116 - extraChromeH);
+
+  const transition = page.transition ?? "none";
+  const animClass = !hasNavigated
+    ? ""
+    : transition === "fade"
+      ? "present-anim-fade"
+      : transition === "slide"
+        ? direction === "prev"
+          ? "present-anim-slide-prev"
+          : "present-anim-slide-next"
+        : transition === "zoom"
+          ? "present-anim-zoom"
+          : "";
+
+  const jumpTo = (target: number) => {
+    if (target === index || target < 0 || target >= pages.length) return;
+    setDirection(target > index ? "next" : "prev");
+    setHasNavigated(true);
+    setIndex(target);
+  };
+  const goPrev = () => jumpTo(Math.max(0, index - 1));
+  const goNext = () => jumpTo(Math.min(pages.length - 1, index + 1));
+
+  const toSlidePoint = (clientX: number, clientY: number) => {
+    const rect = slideFrameRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: ((clientX - rect.left) / rect.width) * width,
+      y: ((clientY - rect.top) / rect.height) * height,
+    };
+  };
+
+  const handleSlidePointerDown = (e: React.PointerEvent) => {
+    if (tool !== "draw") return;
+    const pt = toSlidePoint(e.clientX, e.clientY);
+    if (!pt) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setLiveDraw({ color: inkColor, points: [pt] });
+  };
+
+  const handleSlidePointerMove = (e: React.PointerEvent) => {
+    const pt = toSlidePoint(e.clientX, e.clientY);
+    if (!pt) return;
+    if (tool === "laser") {
+      setLaserTrail((prev) => [...prev.slice(-18), { x: pt.x, y: pt.y, ts: Date.now() }]);
+    } else if (tool === "draw" && liveDraw) {
+      setLiveDraw((prev) => (prev ? { ...prev, points: [...prev.points, pt] } : null));
+    }
+  };
+
+  const handleSlidePointerUp = () => {
+    if (liveDraw && liveDraw.points.length > 1) {
+      setAnnotations((prev) => ({
+        ...prev,
+        [page.id]: [...(prev[page.id] ?? []), liveDraw],
+      }));
+    }
+    setLiveDraw(null);
+  };
+
+  const slideStrokes = annotations[page.id] ?? [];
+  const latestLaser = laserTrail[laserTrail.length - 1];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#060911] text-white">
-      <div className="flex flex-1 items-center justify-center p-6">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#060911] text-white select-none">
+      <div className="flex flex-1 items-center justify-center overflow-hidden p-5">
         <div
-          key={page.id}
-          className="overflow-hidden rounded-lg shadow-2xl ring-1 ring-white/10 transition-all duration-300"
+          ref={slideFrameRef}
+          key={`${page.id}_${index}`}
+          onPointerDown={handleSlidePointerDown}
+          onPointerMove={handleSlidePointerMove}
+          onPointerUp={handleSlidePointerUp}
+          onPointerLeave={() => {
+            if (tool === "laser") setLaserTrail([]);
+          }}
+          className={`relative overflow-hidden rounded-lg shadow-2xl ring-1 ring-white/10 ${animClass} ${
+            tool === "laser"
+              ? "cursor-none"
+              : tool === "draw"
+                ? "cursor-crosshair touch-none"
+                : "cursor-default"
+          }`}
         >
           <PagePreview page={page} width={width} height={height} maxWidth={maxW} maxHeight={maxH} />
+
+          {/* Ephemeral Presenter Draw & Laser SVG Overlay */}
+          {(slideStrokes.length > 0 || liveDraw || laserTrail.length > 0) && (
+            <svg
+              viewBox={`0 0 ${width} ${height}`}
+              className="pointer-events-none absolute inset-0 h-full w-full"
+            >
+              {slideStrokes.map((st, sIdx) => (
+                <path
+                  key={sIdx}
+                  d={st.points
+                    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+                    .join(" ")}
+                  fill="none"
+                  stroke={st.color}
+                  strokeWidth={Math.max(4, width * 0.0045)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.92}
+                />
+              ))}
+              {liveDraw && liveDraw.points.length > 1 && (
+                <path
+                  d={liveDraw.points
+                    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+                    .join(" ")}
+                  fill="none"
+                  stroke={liveDraw.color}
+                  strokeWidth={Math.max(4, width * 0.0045)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.92}
+                />
+              )}
+              {laserTrail.length > 1 &&
+                laserTrail.slice(1).map((pt, i) => {
+                  const prev = laserTrail[i];
+                  const ratio = (i + 1) / laserTrail.length;
+                  return (
+                    <line
+                      key={`${pt.ts}_${i}`}
+                      x1={prev.x}
+                      y1={prev.y}
+                      x2={pt.x}
+                      y2={pt.y}
+                      stroke="#FF2D55"
+                      strokeWidth={Math.max(4, width * 0.006 * ratio)}
+                      strokeLinecap="round"
+                      opacity={ratio * 0.65}
+                    />
+                  );
+                })}
+              {latestLaser && (
+                <g>
+                  <circle
+                    cx={latestLaser.x}
+                    cy={latestLaser.y}
+                    r={Math.max(12, width * 0.012)}
+                    fill="#FF2D55"
+                    opacity={0.28}
+                  />
+                  <circle
+                    cx={latestLaser.x}
+                    cy={latestLaser.y}
+                    r={Math.max(5, width * 0.0055)}
+                    fill="#FF2D55"
+                    stroke="#FFFFFF"
+                    strokeWidth={Math.max(1.5, width * 0.0018)}
+                  />
+                </g>
+              )}
+            </svg>
+          )}
         </div>
       </div>
 
+      {/* Speaker Notes Drawer */}
       {showNotes && (
-        <div className="mx-auto mb-2 w-full max-w-3xl rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-slate-300">
+        <div className="mx-auto mb-2 w-full max-w-3xl rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs text-slate-300">
           <div className="font-semibold text-white">Speaker Notes ({page.name})</div>
-          <p className="mt-1 whitespace-pre-wrap">{page.notes || "No speaker notes for this slide."}</p>
+          <p className="mt-1 max-h-16 overflow-y-auto whitespace-pre-wrap">
+            {page.notes || "No speaker notes for this slide."}
+          </p>
         </div>
       )}
 
-      <div className="flex items-center justify-between border-t border-white/10 bg-black/50 px-6 py-3">
-        <div className="text-xs text-slate-400">
-          Slide {index + 1} / {pages.length} — {page.name}
+      {/* Slide Jump Filmstrip */}
+      {showStrip && (
+        <div className="border-t border-white/10 bg-black/60 px-6 py-2.5">
+          <div className="flex items-center gap-2.5 overflow-x-auto pb-0.5">
+            {pages.map((p, idx) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => jumpTo(idx)}
+                className={`relative shrink-0 overflow-hidden rounded-md transition cursor-pointer ${
+                  idx === index
+                    ? "ring-2 ring-white scale-[1.03]"
+                    : "ring-1 ring-white/15 opacity-70 hover:opacity-100"
+                }`}
+                title={`Slide ${idx + 1}: ${p.name}`}
+              >
+                <PagePreview page={p} width={width} height={height} maxWidth={96} maxHeight={54} />
+                <span className="absolute bottom-1 left-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                  {idx + 1}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+      )}
+
+      {/* Presenter Control Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-black/60 px-5 py-2.5">
+        <div className="flex items-center gap-3 text-xs text-slate-300">
+          <span className="font-medium text-white">
+            {index + 1} / {pages.length}
+          </span>
+          <span className="hidden text-slate-400 sm:inline">{page.name}</span>
+          {transition !== "none" && (
+            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] capitalize text-slate-300">
+              {transition}
+            </span>
+          )}
+          <div className="h-4 w-px bg-white/15" />
+          {/* Elapsed Timer */}
+          <div className="inline-flex items-center gap-1.5 rounded-lg bg-white/8 px-2 py-1 font-mono text-[11px] text-white">
+            <Clock className="h-3 w-3 text-slate-400" />
+            <span>{formatElapsed(elapsedSec)}</span>
+            <button
+              type="button"
+              onClick={() => setTimerPaused((p) => !p)}
+              title={timerPaused ? "Resume timer" : "Pause timer"}
+              className="rounded p-0.5 text-slate-300 hover:bg-white/15 hover:text-white cursor-pointer"
+            >
+              {timerPaused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setElapsedSec(0)}
+              title="Reset timer"
+              className="rounded p-0.5 text-slate-300 hover:bg-white/15 hover:text-white cursor-pointer"
+            >
+              <RotateCcw className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+
+        {/* Center: Laser & Draw Tools */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-0.5 rounded-lg bg-white/10 p-0.5">
+            <button
+              type="button"
+              onClick={() => setTool("pointer")}
+              title="Pointer"
+              className={`rounded-md px-2 py-1 text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer ${
+                tool === "pointer" ? "bg-white text-black" : "text-slate-300 hover:text-white"
+              }`}
+            >
+              <Pointer className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool((t) => (t === "laser" ? "pointer" : "laser"))}
+              title="Laser Pointer (L)"
+              className={`rounded-md px-2 py-1 text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer ${
+                tool === "laser" ? "bg-rose-500 text-white" : "text-slate-300 hover:text-white"
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" /> Laser
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool((t) => (t === "draw" ? "pointer" : "draw"))}
+              title="Annotate Slide (D)"
+              className={`rounded-md px-2 py-1 text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer ${
+                tool === "draw" ? "bg-white text-black" : "text-slate-300 hover:text-white"
+              }`}
+            >
+              <PenTool className="h-3.5 w-3.5" /> Draw
+            </button>
+          </div>
+
+          {tool === "draw" && (
+            <div className="flex items-center gap-1 rounded-lg bg-white/10 px-2 py-1">
+              {PRESENTER_INK_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setInkColor(c)}
+                  className={`h-4 w-4 rounded-full border cursor-pointer ${
+                    inkColor === c ? "scale-110 border-white ring-2 ring-white/40" : "border-white/30"
+                  }`}
+                  style={{ background: c }}
+                  title={`Ink ${c}`}
+                />
+              ))}
+              {slideStrokes.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAnnotations((prev) => ({
+                        ...prev,
+                        [page.id]: (prev[page.id] ?? []).slice(0, -1),
+                      }))
+                    }
+                    title="Undo annotation"
+                    className="ml-1 rounded p-0.5 text-slate-300 hover:bg-white/15 hover:text-white cursor-pointer"
+                  >
+                    <Undo2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAnnotations((prev) => ({
+                        ...prev,
+                        [page.id]: [],
+                      }))
+                    }
+                    title="Clear slide ink"
+                    className="rounded p-0.5 text-slate-300 hover:bg-white/15 hover:text-rose-400 cursor-pointer"
+                  >
+                    <Eraser className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right: Navigation, Strip, Notes, Fullscreen, Exit */}
+        <div className="flex items-center gap-1.5">
           <button
-            onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            onClick={goPrev}
             disabled={index === 0}
-            className="rounded-lg bg-white/10 p-2 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
+            title="Previous slide (←)"
+            className="rounded-lg bg-white/10 p-1.5 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setIndex((i) => Math.min(pages.length - 1, i + 1))}
+            onClick={goNext}
             disabled={index === pages.length - 1}
-            className="rounded-lg bg-white/10 p-2 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
+            title="Next slide (→)"
+            className="rounded-lg bg-white/10 p-1.5 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setShowNotes((s) => !s)}
-            className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium hover:bg-white/20 cursor-pointer"
+            onClick={() => setShowStrip((s) => !s)}
+            title="Slide Strip (G)"
+            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer ${
+              showStrip ? "bg-white text-black" : "bg-white/10 hover:bg-white/20"
+            }`}
           >
-            {showNotes ? "Hide Notes" : "Notes"}
+            <LayoutGrid className="h-3.5 w-3.5" /> Slides
+          </button>
+          <button
+            onClick={() => setShowNotes((s) => !s)}
+            title="Speaker Notes (N)"
+            className={`rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer ${
+              showNotes ? "bg-white text-black" : "bg-white/10 hover:bg-white/20"
+            }`}
+          >
+            Notes
           </button>
           <button
             onClick={() => {
               if (document.fullscreenElement) void document.exitFullscreen();
               else void document.documentElement.requestFullscreen();
             }}
-            className="rounded-lg bg-white/10 p-2 hover:bg-white/20 cursor-pointer"
+            className="rounded-lg bg-white/10 p-1.5 hover:bg-white/20 cursor-pointer"
             title="Toggle Fullscreen"
           >
             <Maximize2 className="h-4 w-4" />
@@ -728,6 +1244,7 @@ export function CommentsDrawer({
   comments,
   activePageId,
   commentMode,
+  canComment = true,
   onToggleCommentMode,
   onReply,
   onResolve,
@@ -737,6 +1254,7 @@ export function CommentsDrawer({
   comments: DesignComment[];
   activePageId: string;
   commentMode: boolean;
+  canComment?: boolean;
   onToggleCommentMode: () => void;
   onReply: (commentId: string, text: string) => void;
   onResolve: (commentId: string) => void;
@@ -759,16 +1277,22 @@ export function CommentsDrawer({
       </div>
 
       <div className="border-b border-[var(--border)] p-3">
-        <button
-          onClick={onToggleCommentMode}
-          className={`w-full rounded-xl py-2 text-xs font-semibold transition cursor-pointer ${
-            commentMode
-              ? "bg-[#4F46E5] text-white"
-              : "border border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)] hover:border-[var(--accent)]"
-          }`}
-        >
-          {commentMode ? "Pin Mode Active — Click Canvas" : "+ Pin New Comment on Page"}
-        </button>
+        {canComment ? (
+          <button
+            onClick={onToggleCommentMode}
+            className={`w-full rounded-xl py-2 text-xs font-semibold transition cursor-pointer ${
+              commentMode
+                ? "bg-[#4F46E5] text-white"
+                : "border border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)] hover:border-[var(--accent)]"
+            }`}
+          >
+            {commentMode ? "Pin Mode Active — Click Canvas" : "+ Pin New Comment on Page"}
+          </button>
+        ) : (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-center text-[11px] text-[var(--muted)]">
+            View-only link — commenting is disabled
+          </div>
+        )}
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto p-3">
@@ -790,7 +1314,7 @@ export function CommentsDrawer({
                 <span className="font-semibold text-[var(--fg)]">
                   #{idx + 1} {c.authorName}
                 </span>
-                {!c.resolved && (
+                {canComment && !c.resolved && (
                   <button
                     onClick={() => onResolve(c.id)}
                     className="text-[11px] font-medium text-emerald-600 hover:underline cursor-pointer"
@@ -812,7 +1336,7 @@ export function CommentsDrawer({
                 </div>
               )}
 
-              {!c.resolved && (
+              {canComment && !c.resolved && (
                 <div className="mt-2 flex gap-1">
                   <input
                     value={replyDrafts[c.id] || ""}

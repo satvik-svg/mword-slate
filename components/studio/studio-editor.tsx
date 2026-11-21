@@ -8,6 +8,7 @@ import { PagePreview } from "@/components/page-preview";
 import { CanvasStage } from "@/components/studio/canvas-stage";
 import { DataEditorPanel } from "@/components/studio/data-editor-panel";
 import { LeftRail, type RailTab } from "@/components/studio/left-rail";
+import { MagicEraserModal } from "@/components/studio/magic-eraser-modal";
 import {
   CommentsDrawer,
   ExportModal,
@@ -24,8 +25,14 @@ import {
   isLightColor,
   pickContrastingText,
 } from "@/lib/brand-style";
+import {
+  type CollabClientMessage,
+  type CollabPeer,
+  type CollabServerMessage,
+} from "@/lib/collab";
 import { syncCustomFonts } from "@/lib/custom-fonts";
 import { generateThumbnail } from "@/lib/exporter";
+import { computeAlignElements, computeDistributeElements } from "@/lib/geometry";
 import { makeId } from "@/lib/id";
 import { importPptxFile } from "@/lib/pptx-import";
 import { magicResizePages } from "@/lib/resize";
@@ -33,10 +40,12 @@ import {
   DEFAULT_BRAND_KIT,
   type BrandKit,
   type CanvasElement,
+  type CustomFontItem,
   type DesignComment,
   type DesignPage,
   type DesignRecord,
   type DesignVersion,
+  type ImageElement,
   type MediaAsset,
   type ShareConfig,
   type TemplateRecord,
@@ -48,18 +57,25 @@ type Snapshot = {
   height: number;
 };
 
+type CopiedStyleState = {
+  type: CanvasElement["type"];
+  patch: Partial<CanvasElement>;
+};
+
 export function StudioEditor({
   initialDesign,
   initialTab = "templates",
   readOnly = false,
   canComment = true,
   shareEndpoint,
+  initialCustomFonts,
 }: {
   initialDesign: DesignRecord;
   initialTab?: RailTab | null;
   readOnly?: boolean;
   canComment?: boolean;
   shareEndpoint?: string;
+  initialCustomFonts?: CustomFontItem[];
 }) {
   const router = useRouter();
   const { user } = useAuth();
@@ -99,7 +115,7 @@ export function StudioEditor({
     const maxDim = Math.max(initialDesign.width, initialDesign.height);
     return Math.max(0.2, Math.min(0.85, +(760 / maxDim).toFixed(2)));
   });
-  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved" | "error">("saved");
   const [gridView, setGridView] = useState(false);
   const [gridDragIdx, setGridDragIdx] = useState<number | null>(null);
   const [gridOverIdx, setGridOverIdx] = useState<number | null>(null);
@@ -142,7 +158,10 @@ export function StudioEditor({
   const [toast, setToast] = useState<string | null>(null);
 
   // Workspace data
-  const [brandKit, setBrandKit] = useState<BrandKit>(DEFAULT_BRAND_KIT);
+  const [brandKit, setBrandKit] = useState<BrandKit>(() => ({
+    ...DEFAULT_BRAND_KIT,
+    customFonts: initialCustomFonts ?? [],
+  }));
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [teamTemplates, setTeamTemplates] = useState<TemplateRecord[]>([]);
 
@@ -158,8 +177,26 @@ export function StudioEditor({
     color: "#0F172A",
     strokeWidth: 4,
   });
-  const [copiedStyle, setCopiedStyle] = useState<Partial<CanvasElement> | null>(null);
+  const [copiedStyle, setCopiedStyle] = useState<CopiedStyleState | null>(null);
   const clipboardRef = useRef<CanvasElement[]>([]);
+  const [hasClipboard, setHasClipboard] = useState(false);
+  const [croppingId, setCroppingId] = useState<string | null>(null);
+  const [magicEraserTarget, setMagicEraserTarget] = useState<ImageElement | null>(null);
+
+  // Live multiplayer collaboration (Cloudflare Durable Object WebSocket)
+  const [remotePeers, setRemotePeers] = useState<CollabPeer[]>([]);
+  const [collabConnected, setCollabConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const collabRevRef = useRef(0);
+  const collabFirstMountRef = useRef(true);
+  const suppressCollabBroadcastRef = useRef(false);
+  const suppressAutoSaveRef = useRef(false);
+  const lastCursorSentRef = useRef(0);
+  const cursorPosRef = useRef<{ x: number; y: number; visible: boolean }>({
+    x: 0,
+    y: 0,
+    visible: false,
+  });
 
   // Undo / Redo stack
   const historyRef = useRef<Snapshot[]>([{ pages: initialDesign.pages, width: initialDesign.width, height: initialDesign.height }]);
@@ -172,6 +209,19 @@ export function StudioEditor({
     [activePage.elements, selectedIds],
   );
   const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null;
+  const activeCroppingId = useMemo(() => {
+    if (!croppingId || readOnly) return null;
+    if (!selectedIds.includes(croppingId)) return null;
+    const el = activePage.elements.find((e) => e.id === croppingId);
+    return el && el.type === "image" && !el.locked ? croppingId : null;
+  }, [croppingId, readOnly, selectedIds, activePage.elements]);
+
+  const activePageIdRef = useRef(activePage.id);
+  const selectedIdsRef = useRef<string[]>(selectedIds);
+  useEffect(() => {
+    activePageIdRef.current = activePage.id;
+    selectedIdsRef.current = selectedIds;
+  }, [activePage.id, selectedIds]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -184,7 +234,15 @@ export function StudioEditor({
     void fetch("/api/brand-kit", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { brandKit?: BrandKit } | null) => {
-        if (d?.brandKit) setBrandKit(d.brandKit);
+        if (d?.brandKit) {
+          const mergedFonts = [...(d.brandKit.customFonts ?? [])];
+          for (const font of initialCustomFonts ?? []) {
+            if (!mergedFonts.some((x) => x.name.toLowerCase() === font.name.toLowerCase())) {
+              mergedFonts.push(font);
+            }
+          }
+          setBrandKit({ ...d.brandKit, customFonts: mergedFonts });
+        }
       })
       .catch(() => undefined);
 
@@ -201,7 +259,7 @@ export function StudioEditor({
         if (d?.templates) setTeamTemplates(d.templates);
       })
       .catch(() => undefined);
-  }, [readOnly]);
+  }, [readOnly, initialCustomFonts]);
 
   useEffect(() => {
     void syncCustomFonts(brandKit.customFonts);
@@ -231,7 +289,9 @@ export function StudioEditor({
     if (historyIdxRef.current <= 0) return;
     historyIdxRef.current -= 1;
     const snap = historyRef.current[historyIdxRef.current];
-    setPages(JSON.parse(JSON.stringify(snap.pages)) as DesignPage[]);
+    const nextPages = JSON.parse(JSON.stringify(snap.pages)) as DesignPage[];
+    setPages(nextPages);
+    setActivePageIdx((cur) => Math.max(0, Math.min(cur, nextPages.length - 1)));
     setWidth(snap.width);
     setHeight(snap.height);
     setSelectedIds([]);
@@ -243,7 +303,9 @@ export function StudioEditor({
     if (historyIdxRef.current >= historyRef.current.length - 1) return;
     historyIdxRef.current += 1;
     const snap = historyRef.current[historyIdxRef.current];
-    setPages(JSON.parse(JSON.stringify(snap.pages)) as DesignPage[]);
+    const nextPages = JSON.parse(JSON.stringify(snap.pages)) as DesignPage[];
+    setPages(nextPages);
+    setActivePageIdx((cur) => Math.max(0, Math.min(cur, nextPages.length - 1)));
     setWidth(snap.width);
     setHeight(snap.height);
     setSelectedIds([]);
@@ -251,13 +313,91 @@ export function StudioEditor({
     setSaveStatus("unsaved");
   }, []);
 
-  // Debounced auto-save
+  // Debounced auto-save + unsaved-changes guard + keepalive flush
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firstMountRef = useRef(true);
+  const dirtyRef = useRef(false);
+  const latestDesignRef = useRef({
+    title,
+    width,
+    height,
+    pages,
+    comments,
+    versions,
+    shareConfig,
+    readOnly,
+    endpoint: shareEndpoint || `/api/designs/${initialDesign.id}`,
+  });
+
+  useEffect(() => {
+    latestDesignRef.current = {
+      title,
+      width,
+      height,
+      pages,
+      comments,
+      versions,
+      shareConfig,
+      readOnly,
+      endpoint: shareEndpoint || `/api/designs/${initialDesign.id}`,
+    };
+  }, [title, width, height, pages, comments, versions, shareConfig, readOnly, shareEndpoint, initialDesign.id]);
+
+  const flushPendingDesign = useCallback(() => {
+    const latest = latestDesignRef.current;
+    if (latest.readOnly) return;
+    if (!dirtyRef.current && !saveTimerRef.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    dirtyRef.current = false;
+    const payload = JSON.stringify({
+      title: latest.title,
+      width: latest.width,
+      height: latest.height,
+      pages: latest.pages,
+      comments: latest.comments,
+      versions: latest.versions,
+      shareConfig: latest.shareConfig,
+    });
+    // Browser fetch keepalive has a ~64 KB body limit; use keepalive when safely under it
+    void fetch(latest.endpoint, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      keepalive: payload.length < 60_000,
+    }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (readOnly) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current || saveTimerRef.current !== null) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    const onPageHide = () => {
+      flushPendingDesign();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
+      flushPendingDesign();
+    };
+  }, [readOnly, flushPendingDesign]);
 
   const persistDesign = useCallback(
     async (overrides?: Partial<DesignRecord>) => {
       if (readOnly && !overrides?.comments) return;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
       setSaveStatus("saving");
       try {
         let thumbnail = initialDesign.thumbnail;
@@ -287,9 +427,19 @@ export function StudioEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        if (res.ok) setSaveStatus("saved");
+        if (res.ok) {
+          dirtyRef.current = false;
+          setSaveStatus("saved");
+        } else {
+          dirtyRef.current = true;
+          setSaveStatus("error");
+          const err = (await res.json().catch(() => null)) as { error?: string } | null;
+          notify(err?.error || "Could not save changes — click Retry");
+        }
       } catch {
-        setSaveStatus("unsaved");
+        dirtyRef.current = true;
+        setSaveStatus("error");
+        notify("Network error while saving — click Retry");
       }
     },
     [
@@ -304,6 +454,7 @@ export function StudioEditor({
       comments,
       versions,
       shareConfig,
+      notify,
     ],
   );
 
@@ -313,14 +464,237 @@ export function StudioEditor({
       return;
     }
     if (readOnly) return;
+    if (suppressAutoSaveRef.current) {
+      suppressAutoSaveRef.current = false;
+      return;
+    }
+    dirtyRef.current = true;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
       void persistDesign();
     }, 1100);
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
     };
   }, [title, width, height, pages, shareConfig, versions, readOnly, persistDesign]);
+
+  const sendCollab = useCallback((msg: CollabClientMessage) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch {
+      // ignore closed socket race
+    }
+  }, []);
+
+  // Connect to Cloudflare Durable Object multiplayer room for this design
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof WebSocket === "undefined") return;
+    let disposed = false;
+    let openedOnce = false;
+    let reconnectAttempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${proto}//${window.location.host}/api/collab/${encodeURIComponent(initialDesign.id)}`;
+
+    const connect = () => {
+      if (disposed) return;
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch {
+        return;
+      }
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (disposed) {
+          ws.close();
+          return;
+        }
+        openedOnce = true;
+        reconnectAttempt = 0;
+        setCollabConnected(true);
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "cursor",
+              pageId: activePageIdRef.current,
+              x: cursorPosRef.current.x,
+              y: cursorPosRef.current.y,
+              cursorVisible: cursorPosRef.current.visible,
+              selectedIds: selectedIdsRef.current,
+            } satisfies CollabClientMessage),
+          );
+        } catch {
+          // ignore
+        }
+        if (pingTimer) clearInterval(pingTimer);
+        pingTimer = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({ type: "ping" } satisfies CollabClientMessage));
+            } catch {
+              // ignore
+            }
+          }
+        }, 25_000);
+      };
+
+      ws.onmessage = (ev) => {
+        if (typeof ev.data !== "string") return;
+        let msg: CollabServerMessage;
+        try {
+          msg = JSON.parse(ev.data) as CollabServerMessage;
+        } catch {
+          return;
+        }
+
+        if (msg.type === "welcome") {
+          setRemotePeers(msg.peers);
+        } else if (msg.type === "peer_join") {
+          setRemotePeers((prev) => [
+            ...prev.filter((p) => p.clientId !== msg.peer.clientId),
+            msg.peer,
+          ]);
+        } else if (msg.type === "peer_leave") {
+          setRemotePeers((prev) => prev.filter((p) => p.clientId !== msg.clientId));
+        } else if (msg.type === "cursor") {
+          setRemotePeers((prev) =>
+            prev.map((p) =>
+              p.clientId === msg.clientId
+                ? {
+                    ...p,
+                    pageId: msg.pageId,
+                    x: msg.x,
+                    y: msg.y,
+                    cursorVisible: msg.cursorVisible,
+                    selectedIds: msg.selectedIds,
+                    lastSeen: Date.now(),
+                  }
+                : p,
+            ),
+          );
+        } else if (msg.type === "design_sync") {
+          if (msg.rev < collabRevRef.current) return;
+          collabRevRef.current = Math.max(collabRevRef.current, msg.rev);
+          suppressCollabBroadcastRef.current = true;
+          suppressAutoSaveRef.current = true;
+          if (Array.isArray(msg.pages) && msg.pages.length > 0) {
+            setPages(msg.pages);
+            setActivePageIdx((cur) => Math.max(0, Math.min(cur, msg.pages.length - 1)));
+          }
+          if (typeof msg.title === "string") setTitle(msg.title);
+          if (typeof msg.width === "number" && msg.width > 0) setWidth(msg.width);
+          if (typeof msg.height === "number" && msg.height > 0) setHeight(msg.height);
+        } else if (msg.type === "comments_sync") {
+          if (Array.isArray(msg.comments)) {
+            setComments(msg.comments);
+          }
+        }
+      };
+
+      ws.onclose = () => {
+        if (pingTimer) {
+          clearInterval(pingTimer);
+          pingTimer = null;
+        }
+        if (wsRef.current === ws) wsRef.current = null;
+        setCollabConnected(false);
+        setRemotePeers([]);
+        // Only retry if we previously established a real Worker WebSocket connection
+        if (!disposed && openedOnce && reconnectAttempt < 6) {
+          const delay = Math.min(10_000, 1200 * 2 ** reconnectAttempt);
+          reconnectAttempt += 1;
+          reconnectTimer = setTimeout(connect, delay);
+        }
+      };
+
+      ws.onerror = () => {
+        // onclose handles cleanup
+      };
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (pingTimer) clearInterval(pingTimer);
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        try {
+          ws.close(1000, "unmount");
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [initialDesign.id]);
+
+  // Broadcast throttled pointer updates to peers
+  const handleCursorMove = useCallback(
+    (x: number, y: number, visible: boolean) => {
+      cursorPosRef.current = { x, y, visible };
+      const now = Date.now();
+      if (visible && now - lastCursorSentRef.current < 45) return;
+      lastCursorSentRef.current = now;
+      sendCollab({
+        type: "cursor",
+        pageId: activePageIdRef.current,
+        x: Math.round(x),
+        y: Math.round(y),
+        cursorVisible: visible,
+        selectedIds: selectedIdsRef.current,
+      });
+    },
+    [sendCollab],
+  );
+
+  // Sync active page & selected element outlines immediately on change
+  useEffect(() => {
+    if (!collabConnected) return;
+    sendCollab({
+      type: "cursor",
+      pageId: activePage.id,
+      x: Math.round(cursorPosRef.current.x),
+      y: Math.round(cursorPosRef.current.y),
+      cursorVisible: cursorPosRef.current.visible,
+      selectedIds,
+    });
+  }, [collabConnected, activePage.id, selectedIds, sendCollab]);
+
+  // Broadcast local design mutations to live peers (debounced 120ms)
+  useEffect(() => {
+    if (collabFirstMountRef.current) {
+      collabFirstMountRef.current = false;
+      return;
+    }
+    if (readOnly || !collabConnected) return;
+    if (suppressCollabBroadcastRef.current) {
+      suppressCollabBroadcastRef.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      collabRevRef.current += 1;
+      sendCollab({
+        type: "design_sync",
+        rev: collabRevRef.current,
+        title,
+        width,
+        height,
+        pages,
+      });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [title, width, height, pages, readOnly, collabConnected, sendCollab]);
 
   // Element & page mutation helpers
   const updateActivePageElements = useCallback(
@@ -342,6 +716,16 @@ export function StudioEditor({
       });
     },
     [activePageIdx, pushHistory],
+  );
+
+  const updateActivePageNoHistory = useCallback(
+    (patch: Partial<DesignPage>) => {
+      setPages((prev) =>
+        prev.map((p, idx) => (idx === activePageIdx ? { ...p, ...patch } : p)),
+      );
+      setSaveStatus("unsaved");
+    },
+    [activePageIdx],
   );
 
   const handleAddElement = useCallback(
@@ -448,15 +832,7 @@ export function StudioEditor({
           idx === activePageIdx
             ? {
                 ...p,
-                elements: p.elements.map((el) => {
-                  if (!selectedIds.includes(el.id) || el.locked) return el;
-                  if (mode === "left") return { ...el, x: 0 };
-                  if (mode === "centerX") return { ...el, x: Math.round((width - el.width) / 2) };
-                  if (mode === "right") return { ...el, x: width - el.width };
-                  if (mode === "top") return { ...el, y: 0 };
-                  if (mode === "centerY") return { ...el, y: Math.round((height - el.height) / 2) };
-                  return { ...el, y: height - el.height };
-                }),
+                elements: computeAlignElements(p.elements, selectedIds, mode, width, height),
               }
             : p,
         );
@@ -467,15 +843,40 @@ export function StudioEditor({
     [activePageIdx, height, width, selectedIds, pushHistory],
   );
 
+  const handleDistribute = useCallback(
+    (axis: "h" | "v") => {
+      if (selectedIds.length < 3) return;
+      setPages((prev) => {
+        const next = prev.map((p, idx) =>
+          idx === activePageIdx
+            ? {
+                ...p,
+                elements: computeDistributeElements(p.elements, selectedIds, axis),
+              }
+            : p,
+        );
+        pushHistory(next);
+        return next;
+      });
+      notify(axis === "h" ? "Distributed horizontally" : "Distributed vertically");
+    },
+    [activePageIdx, selectedIds, pushHistory, notify],
+  );
+
   const handleReorderLayer = useCallback(
-    (id: string, dir: "up" | "down") => {
+    (id: string, dir: "front" | "up" | "down" | "back") => {
       setPages((prev) => {
         const next = prev.map((p, idx) => {
           if (idx !== activePageIdx) return p;
           const arr = [...p.elements];
           const pos = arr.findIndex((e) => e.id === id);
           if (pos === -1) return p;
-          const target = dir === "up" ? Math.min(arr.length - 1, pos + 1) : Math.max(0, pos - 1);
+          let target = pos;
+          if (dir === "front") target = arr.length - 1;
+          else if (dir === "up") target = Math.min(arr.length - 1, pos + 1);
+          else if (dir === "down") target = Math.max(0, pos - 1);
+          else if (dir === "back") target = 0;
+          if (target === pos) return p;
           const [moved] = arr.splice(pos, 1);
           arr.splice(target, 0, moved);
           return { ...p, elements: arr };
@@ -487,37 +888,195 @@ export function StudioEditor({
     [activePageIdx, pushHistory],
   );
 
+  const handleCopySelected = useCallback(() => {
+    if (!selectedElements.length) return;
+    clipboardRef.current = JSON.parse(JSON.stringify(selectedElements)) as CanvasElement[];
+    setHasClipboard(true);
+    notify(
+      selectedElements.length === 1
+        ? "Copied element"
+        : `Copied ${selectedElements.length} elements`,
+    );
+  }, [selectedElements, notify]);
+
+  const handlePasteSelected = useCallback(() => {
+    if (!clipboardRef.current.length) return;
+    const pasted = clipboardRef.current.map((el) => ({
+      ...JSON.parse(JSON.stringify(el)),
+      id: makeId("el"),
+      x: el.x + 24,
+      y: el.y + 24,
+      groupId: undefined,
+    })) as CanvasElement[];
+    setPages((prev) => {
+      const next = prev.map((p, idx) =>
+        idx === activePageIdx ? { ...p, elements: [...p.elements, ...pasted] } : p,
+      );
+      pushHistory(next);
+      return next;
+    });
+    setSelectedIds(pasted.map((p) => p.id));
+  }, [activePageIdx, pushHistory]);
+
+  const handleSelectAll = useCallback(() => {
+    const unlocked = activePage.elements.filter((el) => !el.locked).map((el) => el.id);
+    const ids = unlocked.length ? unlocked : activePage.elements.map((el) => el.id);
+    setSelectedIds(ids);
+  }, [activePage.elements]);
+
+  const handleToggleLockSelected = useCallback(() => {
+    if (!selectedElements.length) return;
+    const allLocked = selectedElements.every((el) => !!el.locked);
+    const nextLocked = !allLocked;
+    setPages((prev) => {
+      const next = prev.map((p, idx) =>
+        idx === activePageIdx
+          ? {
+              ...p,
+              elements: p.elements.map((el) =>
+                selectedIds.includes(el.id) ? { ...el, locked: nextLocked } : el,
+              ),
+            }
+          : p,
+      );
+      pushHistory(next);
+      return next;
+    });
+    notify(nextLocked ? "Locked selection" : "Unlocked selection");
+  }, [activePageIdx, selectedElements, selectedIds, pushHistory, notify]);
+
+  const handleSetImageAsBackground = useCallback(
+    (img: ImageElement) => {
+      setPages((prev) => {
+        const next = prev.map((p, idx) =>
+          idx === activePageIdx
+            ? {
+                ...p,
+                backgroundImage: img.src,
+                elements: p.elements.filter((el) => el.id !== img.id),
+              }
+            : p,
+        );
+        pushHistory(next);
+        return next;
+      });
+      setSelectedIds([]);
+      setCroppingId(null);
+      notify("Set image as page background");
+    },
+    [activePageIdx, pushHistory, notify],
+  );
+
+  const handleResetBackground = useCallback(() => {
+    updateActivePage({
+      background: "#FFFFFF",
+      backgroundGradientTo: undefined,
+      backgroundImage: undefined,
+    });
+    notify("Page background reset");
+  }, [updateActivePage, notify]);
+
+  const handleToggleCropImage = useCallback((id: string) => {
+    setCroppingId((cur) => (cur === id ? null : id));
+  }, []);
+
   const handleCopyStyle = useCallback(() => {
     if (!singleSelected) return;
+    let patch: Partial<CanvasElement> | null = null;
     if (singleSelected.type === "text") {
-      setCopiedStyle({
+      patch = {
         fontFamily: singleSelected.fontFamily,
         fontWeight: singleSelected.fontWeight,
+        fontSize: singleSelected.fontSize,
         color: singleSelected.color,
         italic: singleSelected.italic,
+        underline: singleSelected.underline,
+        strikethrough: singleSelected.strikethrough,
+        textTransform: singleSelected.textTransform,
         letterSpacing: singleSelected.letterSpacing,
-      } as Partial<CanvasElement>);
+        lineHeight: singleSelected.lineHeight,
+        align: singleSelected.align,
+        curve: singleSelected.curve,
+        strokeColor: singleSelected.strokeColor,
+        strokeWidth: singleSelected.strokeWidth,
+        shadowBlur: singleSelected.shadowBlur,
+        shadowColor: singleSelected.shadowColor,
+        shadowOffsetY: singleSelected.shadowOffsetY,
+        backgroundColor: singleSelected.backgroundColor,
+        backgroundPadding: singleSelected.backgroundPadding,
+        backgroundRadius: singleSelected.backgroundRadius,
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
     } else if (singleSelected.type === "shape") {
-      setCopiedStyle({
+      patch = {
         fill: singleSelected.fill,
         gradientTo: singleSelected.gradientTo,
+        gradientAngle: singleSelected.gradientAngle,
         stroke: singleSelected.stroke,
         strokeWidth: singleSelected.strokeWidth,
+        strokeDash: singleSelected.strokeDash,
         borderRadius: singleSelected.borderRadius,
-      } as Partial<CanvasElement>);
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
     } else if (singleSelected.type === "image") {
-      setCopiedStyle({
-        filters: singleSelected.filters,
+      patch = {
+        filters: singleSelected.filters ? { ...singleSelected.filters } : undefined,
         borderRadius: singleSelected.borderRadius,
         mask: singleSelected.mask,
-      } as Partial<CanvasElement>);
+        fit: singleSelected.fit,
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
+    } else if (singleSelected.type === "icon") {
+      patch = {
+        color: singleSelected.color,
+        fillColor: singleSelected.fillColor,
+        strokeWidth: singleSelected.strokeWidth,
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
+    } else if (singleSelected.type === "table") {
+      patch = {
+        headerBg: singleSelected.headerBg,
+        headerColor: singleSelected.headerColor,
+        cellBg: singleSelected.cellBg,
+        cellColor: singleSelected.cellColor,
+        borderColor: singleSelected.borderColor,
+        fontSize: singleSelected.fontSize,
+        fontFamily: singleSelected.fontFamily,
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
+    } else if (singleSelected.type === "chart") {
+      patch = {
+        accentColor: singleSelected.accentColor,
+        textColor: singleSelected.textColor,
+        showValues: singleSelected.showValues,
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
+    } else if (singleSelected.type === "draw") {
+      patch = {
+        color: singleSelected.color,
+        strokeWidth: singleSelected.strokeWidth,
+        brush: singleSelected.brush,
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
+    } else if (singleSelected.type === "qrcode") {
+      patch = {
+        fgColor: singleSelected.fgColor,
+        bgColor: singleSelected.bgColor,
+        opacity: singleSelected.opacity,
+      } as Partial<CanvasElement>;
     }
-    notify("Style copied");
+    if (!patch) return;
+    setCopiedStyle({ type: singleSelected.type, patch });
+    notify(`Copied ${singleSelected.type} style`);
   }, [singleSelected, notify]);
 
   const handlePasteStyle = useCallback(() => {
     if (!copiedStyle || !singleSelected) return;
-    handleUpdateElement(singleSelected.id, copiedStyle, true);
+    if (copiedStyle.type !== singleSelected.type) {
+      notify(`Can't paste ${copiedStyle.type} style onto ${singleSelected.type}`);
+      return;
+    }
+    handleUpdateElement(singleSelected.id, copiedStyle.patch, true);
     notify("Style applied");
   }, [copiedStyle, singleSelected, handleUpdateElement, notify]);
 
@@ -744,11 +1303,16 @@ export function StudioEditor({
   );
 
   // Keyboard shortcuts
+  const nudgeDirtyRef = useRef(false);
+
   useEffect(() => {
     if (readOnly) return;
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const targetEl = e.target as HTMLElement | null;
+      const tag = targetEl?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || targetEl?.isContentEditable) {
+        return;
+      }
 
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "0") {
@@ -756,6 +1320,11 @@ export function StudioEditor({
         setAutoFit(true);
         const fit = computeFitZoom();
         if (fit !== null) setZoom(fit);
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        handleSelectAll();
         return;
       }
       if (mod && e.key.toLowerCase() === "z") {
@@ -775,25 +1344,13 @@ export function StudioEditor({
         return;
       }
       if (mod && e.key.toLowerCase() === "c" && selectedIds.length) {
-        clipboardRef.current = JSON.parse(JSON.stringify(selectedElements)) as CanvasElement[];
+        e.preventDefault();
+        handleCopySelected();
         return;
       }
       if (mod && e.key.toLowerCase() === "v" && clipboardRef.current.length) {
         e.preventDefault();
-        const pasted = clipboardRef.current.map((el) => ({
-          ...JSON.parse(JSON.stringify(el)),
-          id: makeId("el"),
-          x: el.x + 24,
-          y: el.y + 24,
-        })) as CanvasElement[];
-        setPages((prev) => {
-          const next = prev.map((p, idx) =>
-            idx === activePageIdx ? { ...p, elements: [...p.elements, ...pasted] } : p,
-          );
-          pushHistory(next);
-          return next;
-        });
-        setSelectedIds(pasted.map((p) => p.id));
+        handlePasteSelected();
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length) {
@@ -809,6 +1366,7 @@ export function StudioEditor({
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        nudgeDirtyRef.current = true;
         updateActivePageElements((els) =>
           els.map((el) =>
             selectedIds.includes(el.id) && !el.locked
@@ -818,20 +1376,34 @@ export function StudioEditor({
         );
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (
+        nudgeDirtyRef.current &&
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
+      ) {
+        nudgeDirtyRef.current = false;
+        commitCurrentToHistory();
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, [
     readOnly,
     undo,
     redo,
     computeFitZoom,
+    handleSelectAll,
+    handleCopySelected,
+    handlePasteSelected,
     handleDuplicateSelected,
     handleGroupToggle,
     handleDeleteElements,
     selectedIds,
-    selectedElements,
-    activePageIdx,
-    pushHistory,
+    commitCurrentToHistory,
     updateActivePageElements,
   ]);
 
@@ -896,9 +1468,9 @@ export function StudioEditor({
   };
 
   // Comments
-  const handlePinComment = (xPct: number, yPct: number) => {
-    const text = window.prompt("Add comment:");
-    if (!text?.trim()) {
+  const handlePinComment = (xPct: number, yPct: number, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
       setCommentMode(false);
       return;
     }
@@ -909,7 +1481,7 @@ export function StudioEditor({
       y: yPct,
       authorName: user?.display_name || "Guest",
       authorEmail: user?.email || "",
-      text: text.trim(),
+      text: trimmed,
       createdAt: Date.now(),
       replies: [],
     };
@@ -917,6 +1489,7 @@ export function StudioEditor({
     setComments(nextComments);
     setCommentMode(false);
     setCommentsOpen(true);
+    sendCollab({ type: "comments_sync", comments: nextComments });
     void persistDesign({ comments: nextComments });
   };
 
@@ -939,6 +1512,7 @@ export function StudioEditor({
         : c,
     );
     setComments(nextComments);
+    sendCollab({ type: "comments_sync", comments: nextComments });
     void persistDesign({ comments: nextComments });
   };
 
@@ -947,6 +1521,7 @@ export function StudioEditor({
       c.id === commentId ? { ...c, resolved: true } : c,
     );
     setComments(nextComments);
+    sendCollab({ type: "comments_sync", comments: nextComments });
     void persistDesign({ comments: nextComments });
   };
 
@@ -1054,12 +1629,23 @@ export function StudioEditor({
     }
   };
 
+  const handleDeleteTeamTemplate = async (id: string) => {
+    setTeamTemplates((prev) => prev.filter((t) => t.id !== id));
+    const res = await fetch(`/api/templates?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (res.ok) notify("Template deleted");
+    else notify("Could not delete template");
+  };
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)]">
       <TopToolbar
         title={title}
         onTitleChange={setTitle}
         saveStatus={saveStatus}
+        onRetrySave={() => void persistDesign()}
         canUndo={historyMeta.idx > 0}
         canRedo={historyMeta.idx < historyMeta.len - 1}
         onUndo={undo}
@@ -1076,17 +1662,25 @@ export function StudioEditor({
         onUpdatePage={updateActivePage}
         selectedElements={selectedElements}
         onUpdateElement={handleUpdateElement}
+        onCommitHistory={commitCurrentToHistory}
         onDuplicateSelected={handleDuplicateSelected}
         onDeleteSelected={() => handleDeleteElements(selectedIds)}
         onGroupToggle={handleGroupToggle}
         onAlign={handleAlign}
+        onDistribute={handleDistribute}
+        onReorderLayer={handleReorderLayer}
         onCopyStyle={handleCopyStyle}
         onPasteStyle={handlePasteStyle}
         hasCopiedStyle={!!copiedStyle}
         onOpenPhotoTab={() => setRailTab("photo")}
+        croppingId={activeCroppingId}
+        onToggleCropImage={handleToggleCropImage}
+        onOpenMagicEraser={(img) => setMagicEraserTarget(img)}
         dataEditorOpen={dataEditorOpen}
         onToggleDataEditor={() => setDataEditorOpen((o) => !o)}
         customFonts={brandKit.customFonts}
+        remotePeers={remotePeers}
+        collabConnected={collabConnected}
       />
 
       {/* Main Studio Body */}
@@ -1103,6 +1697,7 @@ export function StudioEditor({
             onSelect={setSelectedIds}
             onAddElement={handleAddElement}
             onUpdateElement={handleUpdateElement}
+            onCommitHistory={commitCurrentToHistory}
             onDeleteElements={handleDeleteElements}
             onReorderLayer={handleReorderLayer}
             onApplyTemplate={(tplPages, tw, th) => {
@@ -1116,6 +1711,7 @@ export function StudioEditor({
             }}
             teamTemplates={teamTemplates}
             onSaveAsTeamTemplate={handleSaveAsTeamTemplate}
+            onDeleteTeamTemplate={handleDeleteTeamTemplate}
             media={media}
             onUploadMedia={handleUploadMedia}
             onDeleteMedia={handleDeleteMedia}
@@ -1128,6 +1724,7 @@ export function StudioEditor({
             onApplyBrandFont={handleApplyBrandFont}
             drawTool={drawTool}
             onChangeDrawTool={setDrawTool}
+            onOpenMagicEraser={(img) => setMagicEraserTarget(img)}
           />
         )}
 
@@ -1275,6 +1872,25 @@ export function StudioEditor({
               onQuickOpenUploads={() => setRailTab("uploads")}
               onQuickOpenTemplates={() => setRailTab("templates")}
               onOpenDataEditor={() => setDataEditorOpen(true)}
+              onCopySelected={handleCopySelected}
+              onPasteSelected={handlePasteSelected}
+              hasClipboard={hasClipboard}
+              onDuplicateSelected={handleDuplicateSelected}
+              onDeleteSelected={() => handleDeleteElements(selectedIds)}
+              onGroupToggle={handleGroupToggle}
+              onReorderLayer={handleReorderLayer}
+              onCopyStyle={handleCopyStyle}
+              onPasteStyle={handlePasteStyle}
+              hasCopiedStyle={!!copiedStyle}
+              onSetImageAsBackground={handleSetImageAsBackground}
+              onSelectAll={handleSelectAll}
+              onResetBackground={handleResetBackground}
+              onToggleLockSelected={handleToggleLockSelected}
+              canComment={canComment}
+              croppingId={activeCroppingId}
+              onChangeCroppingId={setCroppingId}
+              remotePeers={remotePeers}
+              onCursorMove={handleCursorMove}
             />
           )}
           </div>
@@ -1287,7 +1903,8 @@ export function StudioEditor({
               </div>
               <textarea
                 value={activePage.notes || ""}
-                onChange={(e) => updateActivePage({ notes: e.target.value })}
+                onChange={(e) => updateActivePageNoHistory({ notes: e.target.value })}
+                onBlur={commitCurrentToHistory}
                 rows={2}
                 placeholder="Write talking points for Present Mode or PPTX export…"
                 className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-xs text-[var(--fg)] outline-none"
@@ -1354,6 +1971,7 @@ export function StudioEditor({
           comments={comments}
           activePageId={activePage.id}
           commentMode={commentMode}
+          canComment={canComment}
           onToggleCommentMode={() => setCommentMode((m) => !m)}
           onReply={handleReplyComment}
           onResolve={handleResolveComment}
@@ -1427,6 +2045,21 @@ export function StudioEditor({
         initialIndex={activePageIdx}
         width={width}
         height={height}
+      />
+
+      <MagicEraserModal
+        open={!!magicEraserTarget}
+        element={magicEraserTarget}
+        onClose={() => setMagicEraserTarget(null)}
+        onApply={(nextSrc, originalSrc) => {
+          if (!magicEraserTarget) return;
+          handleUpdateElement(
+            magicEraserTarget.id,
+            { src: nextSrc, originalSrc } as Partial<ImageElement>,
+            true,
+          );
+          notify("Magic Eraser cutout applied");
+        }}
       />
 
       {/* Toast */}
