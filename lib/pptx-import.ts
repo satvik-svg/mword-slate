@@ -3,6 +3,9 @@ import { makeId } from "@/lib/id";
 import {
   DEFAULT_IMAGE_FILTERS,
   type CanvasElement,
+  type ChartDataPoint,
+  type ChartElement,
+  type ChartKind,
   type DesignPage,
   type ShapeKind,
   type TableElement,
@@ -599,6 +602,127 @@ function extractTableElement(
   };
 }
 
+const CHART_PALETTE = ["#4F46E5", "#06B6D4", "#F43F5E", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6"];
+
+async function extractChartElement(
+  gfNode: XmlNode,
+  ctx: TransformContext,
+  docPath: string,
+  rels: Map<string, RelEntry>,
+  zip: JSZip,
+  themeColors: ThemeColors,
+): Promise<ChartElement | null> {
+  const chartRef = firstDescendant(gfNode, "chart");
+  if (!chartRef) return null;
+  const rId = getAttr(chartRef, "r:id") ?? getAttr(chartRef, "id");
+  if (!rId) return null;
+  const rel = rels.get(rId);
+  if (!rel) return null;
+
+  const box = parseXfrm(gfNode, ctx);
+  if (!box) return null;
+
+  const chartPath = resolveRelPath(docPath, rel.target);
+  const chartXml = await zip.file(chartPath)?.async("string");
+  if (!chartXml) return null;
+  const chartDoc = parseXml(chartXml);
+
+  let chartKind: ChartKind = "bar";
+  if (firstDescendant(chartDoc, "doughnutChart")) chartKind = "donut";
+  else if (firstDescendant(chartDoc, "pieChart") || firstDescendant(chartDoc, "pie3DChart")) chartKind = "pie";
+  else if (
+    firstDescendant(chartDoc, "lineChart") ||
+    firstDescendant(chartDoc, "line3DChart") ||
+    firstDescendant(chartDoc, "areaChart")
+  ) {
+    chartKind = "line";
+  }
+
+  const titleNode = firstDescendant(chartDoc, "title");
+  const titleText = titleNode
+    ? allDescendants(titleNode, "t")
+        .map((n) => n.text)
+        .join("")
+        .trim()
+    : "";
+
+  const serNode = firstDescendant(chartDoc, "ser");
+  if (!serNode) return null;
+
+  // Read series default fill color if present
+  const serSpPr = directChild(serNode, "spPr");
+  const serSolid = extractColorInfo(directChild(serSpPr, "solidFill"), themeColors);
+  const serLn = directChild(serSpPr, "ln");
+  const serLnColor = extractColorInfo(directChild(serLn, "solidFill"), themeColors);
+  const accentColor = serSolid?.color ?? serLnColor?.color ?? CHART_PALETTE[0];
+
+  // Read per-point color overrides (<c:dPt>)
+  const pointColors = new Map<number, string>();
+  for (const dPt of directChildren(serNode, "dPt")) {
+    const idxNode = directChild(dPt, "idx");
+    const ptIdx = Number(getAttr(idxNode, "val"));
+    const ptColor = extractColorInfo(directChild(directChild(dPt, "spPr"), "solidFill"), themeColors);
+    if (!Number.isNaN(ptIdx) && ptColor) pointColors.set(ptIdx, ptColor.color);
+  }
+
+  // Extract category labels
+  const catLabels = new Map<number, string>();
+  const catNode = directChild(serNode, "cat");
+  if (catNode) {
+    for (const pt of allDescendants(catNode, "pt")) {
+      const idx = Number(getAttr(pt, "idx"));
+      const v = directChild(pt, "v")?.text?.trim();
+      if (!Number.isNaN(idx) && v !== undefined) catLabels.set(idx, v);
+    }
+  }
+
+  // Extract numeric values
+  const data: ChartDataPoint[] = [];
+  const valNode = directChild(serNode, "val");
+  if (valNode) {
+    const pts = allDescendants(valNode, "pt");
+    pts.forEach((pt, i) => {
+      const idxAttr = Number(getAttr(pt, "idx"));
+      const idx = Number.isNaN(idxAttr) ? i : idxAttr;
+      const rawVal = Number(directChild(pt, "v")?.text?.trim() ?? 0);
+      const value = Number.isFinite(rawVal) ? rawVal : 0;
+      const label = catLabels.get(idx) ?? `Item ${idx + 1}`;
+      const color =
+        pointColors.get(idx) ??
+        (chartKind === "pie" || chartKind === "donut"
+          ? CHART_PALETTE[idx % CHART_PALETTE.length]
+          : accentColor);
+      data.push({ label, value, color });
+    });
+  }
+
+  if (data.length === 0) return null;
+
+  // Detect chart text color if specified in txPr
+  const chartTxColor = extractColorInfo(
+    firstDescendant(directChild(chartDoc, "txPr"), "solidFill"),
+    themeColors,
+  );
+
+  return {
+    id: makeId("el"),
+    type: "chart",
+    name: extractNodeName(gfNode, titleText || "Imported Chart"),
+    x: box.x,
+    y: box.y,
+    width: Math.max(180, box.w),
+    height: Math.max(140, box.h),
+    rotation: box.rotation,
+    opacity: 1,
+    chartKind,
+    title: titleText,
+    data,
+    accentColor,
+    textColor: chartTxColor?.color ?? "#0F172A",
+    showValues: true,
+  };
+}
+
 export async function importPptxBuffer(
   input: ArrayBuffer | Uint8Array | Blob | File,
   fileName = "Imported Presentation.pptx",
@@ -611,13 +735,13 @@ export async function importPptxBuffer(
   const zip = await JSZip.loadAsync(input);
   const themeColors = await loadThemeColors(zip);
 
-  // Read presentation slide dimensions
+  // Read presentation slide dimensions & document tree
   let slideCx = 12192000; // 16:9 default (13.333 in)
   let slideCy = 6858000; // 7.5 in
   const presXml = await zip.file("ppt/presentation.xml")?.async("string");
-  if (presXml) {
-    const doc = parseXml(presXml);
-    const sldSz = firstDescendant(doc, "sldSz");
+  const presDoc = presXml ? parseXml(presXml) : null;
+  if (presDoc) {
+    const sldSz = firstDescendant(presDoc, "sldSz");
     if (sldSz) {
       const cx = Number(getAttr(sldSz, "cx"));
       const cy = Number(getAttr(sldSz, "cy"));
@@ -790,6 +914,7 @@ export async function importPptxBuffer(
           type: "image",
           name: extractNodeName(child, "Imported Image"),
           src: dataUrl,
+          originalSrc: dataUrl,
           x: box.x,
           y: box.y,
           width: Math.max(8, box.w),
@@ -835,7 +960,12 @@ export async function importPptxBuffer(
 
       if (tag === "graphicFrame") {
         const tblEl = extractTableElement(child, ctx, ptToPx, themeColors);
-        if (tblEl) out.push(tblEl);
+        if (tblEl) {
+          out.push(tblEl);
+          continue;
+        }
+        const chartEl = await extractChartElement(child, ctx, docPath, rels, zip, themeColors);
+        if (chartEl) out.push(chartEl);
         continue;
       }
 
@@ -1068,14 +1198,42 @@ export async function importPptxBuffer(
     }
   };
 
-  // Locate slides in presentation order (fall back to numeric slideN.xml order)
-  const slideNames = Object.keys(zip.files)
+  // Locate slides in true presentation order via <p:sldIdLst> + presentation.xml.rels,
+  // falling back to numeric slideN.xml order for any unlisted slides.
+  const allSlideFiles = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
     .sort((a, b) => {
       const na = Number(a.match(/slide(\d+)\.xml/i)?.[1] ?? 0);
       const nb = Number(b.match(/slide(\d+)\.xml/i)?.[1] ?? 0);
       return na - nb;
     });
+
+  const orderedSlides: string[] = [];
+  const seenSlides = new Set<string>();
+  if (presDoc) {
+    const presRels = await loadRels(zip, "ppt/presentation.xml");
+    const sldIdLst = firstDescendant(presDoc, "sldIdLst");
+    if (sldIdLst) {
+      for (const sldId of directChildren(sldIdLst, "sldId")) {
+        const rId = getAttr(sldId, "r:id") ?? getAttr(sldId, "id");
+        if (!rId) continue;
+        const rel = presRels.get(rId);
+        if (!rel) continue;
+        const resolved = resolveRelPath("ppt/presentation.xml", rel.target);
+        if (zip.file(resolved) && !seenSlides.has(resolved)) {
+          orderedSlides.push(resolved);
+          seenSlides.add(resolved);
+        }
+      }
+    }
+  }
+  for (const name of allSlideFiles) {
+    if (!seenSlides.has(name)) {
+      orderedSlides.push(name);
+      seenSlides.add(name);
+    }
+  }
+  const slideNames = orderedSlides;
 
   const rootCtx: TransformContext = {
     mapX: (emuX) => emuX * scaleX,
