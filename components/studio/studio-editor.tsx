@@ -2,18 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Copy,
-  FileText,
-  Grid,
-  Minus,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { Copy, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
-import { LogoMakerModal } from "@/components/logo-maker-modal";
 import { PagePreview } from "@/components/page-preview";
 import { CanvasStage } from "@/components/studio/canvas-stage";
+import { DataEditorPanel } from "@/components/studio/data-editor-panel";
 import { LeftRail, type RailTab } from "@/components/studio/left-rail";
 import {
   CommentsDrawer,
@@ -23,17 +16,22 @@ import {
   ShareModal,
   VersionHistoryModal,
 } from "@/components/studio/modals";
+import { PageStrip } from "@/components/studio/page-strip";
 import { TopToolbar } from "@/components/studio/top-toolbar";
-import { applyStyleToPage } from "@/lib/brand-style";
+import {
+  applyStyleToPage,
+  buildSwatchChartShades,
+  isLightColor,
+  pickContrastingText,
+} from "@/lib/brand-style";
+import { syncCustomFonts } from "@/lib/custom-fonts";
 import { generateThumbnail } from "@/lib/exporter";
 import { makeId } from "@/lib/id";
 import { importPptxFile } from "@/lib/pptx-import";
 import { magicResizePages } from "@/lib/resize";
 import {
   DEFAULT_BRAND_KIT,
-  DEFAULT_IMAGE_FILTERS,
   type BrandKit,
-  type BrandLogoItem,
   type CanvasElement,
   type DesignComment,
   type DesignPage,
@@ -103,13 +101,16 @@ export function StudioEditor({
   });
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
   const [gridView, setGridView] = useState(false);
+  const [gridDragIdx, setGridDragIdx] = useState<number | null>(null);
+  const [gridOverIdx, setGridOverIdx] = useState<number | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [filmstripOpen, setFilmstripOpen] = useState(true);
 
   const computeFitZoom = useCallback(() => {
     const el = stageContainerRef.current;
     if (!el) return null;
-    const availW = Math.max(240, el.clientWidth - 112);
-    const availH = Math.max(200, el.clientHeight - 168);
+    const availW = Math.max(240, el.clientWidth - 96);
+    const availH = Math.max(180, el.clientHeight - 88);
     const ratio = Math.min(availW / Math.max(1, width), availH / Math.max(1, height));
     const floored = Math.floor(ratio * 100) / 100;
     return Math.max(0.15, Math.min(1, floored));
@@ -137,7 +138,7 @@ export function StudioEditor({
   const [presentOpen, setPresentOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentMode, setCommentMode] = useState(false);
-  const [logoMakerOpen, setLogoMakerOpen] = useState(false);
+  const [dataEditorOpen, setDataEditorOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   // Workspace data
@@ -201,6 +202,10 @@ export function StudioEditor({
       })
       .catch(() => undefined);
   }, [readOnly]);
+
+  useEffect(() => {
+    void syncCustomFonts(brandKit.customFonts);
+  }, [brandKit.customFonts]);
 
   // History helpers
   const pushHistory = useCallback((nextPages: DesignPage[], nextW = width, nextH = height) => {
@@ -349,6 +354,9 @@ export function StudioEditor({
         return next;
       });
       setSelectedIds([el.id]);
+      if (el.type === "chart" || el.type === "table") {
+        setDataEditorOpen(true);
+      }
     },
     [activePageIdx, pushHistory],
   );
@@ -514,23 +522,69 @@ export function StudioEditor({
   }, [copiedStyle, singleSelected, handleUpdateElement, notify]);
 
   const styleShuffleRef = useRef<{ key: string; variant: number }>({ key: "", variant: 0 });
+  const brandSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingBrandRef = useRef<BrandKit | null>(null);
+
+  const flushBrandKit = useCallback(async (kit: BrandKit, keepalive = false) => {
+    try {
+      const res = await fetch("/api/brand-kit", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(kit),
+        keepalive,
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (brandSaveTimerRef.current) {
+        clearTimeout(brandSaveTimerRef.current);
+        brandSaveTimerRef.current = null;
+      }
+      if (pendingBrandRef.current) {
+        void flushBrandKit(pendingBrandRef.current, true);
+        pendingBrandRef.current = null;
+      }
+    };
+  }, [flushBrandKit]);
 
   const handleUpdateBrandKit = useCallback(
-    async (nextKit: BrandKit) => {
+    async (nextKit: BrandKit, opts?: { immediate?: boolean; toast?: string }) => {
       const updated: BrandKit = { ...nextKit, updatedAt: Date.now() };
       setBrandKit(updated);
-      try {
-        await fetch("/api/brand-kit", {
-          method: "PUT",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updated),
-        });
-      } catch {
-        // keep optimistic local state
+      pendingBrandRef.current = updated;
+
+      if (brandSaveTimerRef.current) {
+        clearTimeout(brandSaveTimerRef.current);
+        brandSaveTimerRef.current = null;
       }
+
+      if (opts?.immediate) {
+        pendingBrandRef.current = null;
+        const ok = await flushBrandKit(updated);
+        if (opts.toast) {
+          notify(ok ? opts.toast : "Saved locally — couldn't sync Brand Kit");
+        }
+        return;
+      }
+
+      brandSaveTimerRef.current = setTimeout(() => {
+        brandSaveTimerRef.current = null;
+        const latest = pendingBrandRef.current;
+        pendingBrandRef.current = null;
+        if (latest) {
+          void flushBrandKit(latest);
+        }
+      }, 320);
+
+      if (opts?.toast) notify(opts.toast);
     },
-    [],
+    [flushBrandKit, notify],
   );
 
   const handleApplyBrandStyle = useCallback(
@@ -560,6 +614,7 @@ export function StudioEditor({
             colors,
             fonts: {
               heading: brandKit.fonts.heading,
+              subheading: brandKit.fonts.subheading,
               body: brandKit.fonts.body,
             },
             applyColors,
@@ -598,13 +653,21 @@ export function StudioEditor({
         return;
       }
 
+      const colorable = selectedElements.some(
+        (el) => !el.locked && el.type !== "image",
+      );
+      if (!colorable) {
+        notify("Select text, shape, icon, chart, or table to recolor — or deselect for background");
+        return;
+      }
+
       setPages((prev) => {
         const next = prev.map((p, idx) => {
           if (idx !== activePageIdx) return p;
           return {
             ...p,
             elements: p.elements.map((el) => {
-              if (!selectedIds.includes(el.id)) return el;
+              if (!selectedIds.includes(el.id) || el.locked) return el;
               if (el.type === "text") return { ...el, color };
               if (el.type === "shape") {
                 if (el.shape === "line" || el.shape === "arrow") {
@@ -617,9 +680,28 @@ export function StudioEditor({
               }
               if (el.type === "icon") return { ...el, color };
               if (el.type === "draw") return { ...el, color };
-              if (el.type === "chart") return { ...el, accentColor: color };
-              if (el.type === "table") return { ...el, headerBg: color };
-              if (el.type === "qrcode") return { ...el, fgColor: color };
+              if (el.type === "chart") {
+                const shades = buildSwatchChartShades(color, el.data.length);
+                return {
+                  ...el,
+                  accentColor: color,
+                  data: el.data.map((d, dIdx) => ({ ...d, color: shades[dIdx] ?? color })),
+                };
+              }
+              if (el.type === "table") {
+                return {
+                  ...el,
+                  headerBg: color,
+                  headerColor: pickContrastingText(color, "#111114", "#FFFFFF"),
+                };
+              }
+              if (el.type === "qrcode") {
+                return {
+                  ...el,
+                  fgColor: color,
+                  bgColor: isLightColor(color) ? "#111114" : "#FFFFFF",
+                };
+              }
               return el;
             }),
           };
@@ -627,14 +709,15 @@ export function StudioEditor({
         pushHistory(next);
         return next;
       });
+      notify(`Applied ${color} to selection`);
     },
-    [activePageIdx, selectedIds, pushHistory, updateActivePage, notify],
+    [activePageIdx, selectedElements, selectedIds, pushHistory, updateActivePage, notify],
   );
 
   const handleApplyBrandFont = useCallback(
     (font: string): boolean => {
       const hasTextOrTable = selectedElements.some(
-        (el) => el.type === "text" || el.type === "table",
+        (el) => !el.locked && (el.type === "text" || el.type === "table"),
       );
       if (!hasTextOrTable) return false;
       setPages((prev) => {
@@ -643,7 +726,7 @@ export function StudioEditor({
           return {
             ...p,
             elements: p.elements.map((el) => {
-              if (!selectedIds.includes(el.id)) return el;
+              if (!selectedIds.includes(el.id) || el.locked) return el;
               if (el.type === "text" || el.type === "table") {
                 return { ...el, fontFamily: font };
               }
@@ -789,6 +872,27 @@ export function StudioEditor({
     setActivePageIdx(Math.max(0, Math.min(idx, next.length - 1)));
     setSelectedIds([]);
     pushHistory(next);
+  };
+
+  const reorderPage = (fromIdx: number, toIdx: number) => {
+    if (
+      fromIdx === toIdx ||
+      fromIdx < 0 ||
+      toIdx < 0 ||
+      fromIdx >= pages.length ||
+      toIdx >= pages.length
+    ) {
+      return;
+    }
+    const next = [...pages];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    const activeId = pages[activePageIdx]?.id;
+    const nextActive = next.findIndex((p) => p.id === activeId);
+    setPages(next);
+    setActivePageIdx(nextActive >= 0 ? nextActive : toIdx);
+    pushHistory(next);
+    notify(`Moved slide to #${toIdx + 1}`);
   };
 
   // Comments
@@ -950,28 +1054,6 @@ export function StudioEditor({
     }
   };
 
-  const handleSaveLogoToBrand = async (
-    logos: BrandLogoItem[],
-    colors: string[],
-    font: string,
-  ) => {
-    const nextKit: BrandKit = {
-      ...brandKit,
-      logos: [...logos, ...brandKit.logos].slice(0, 12),
-      colors: Array.from(new Set([...colors, ...brandKit.colors])).slice(0, 8),
-      fonts: { ...brandKit.fonts, heading: font },
-      updatedAt: Date.now(),
-    };
-    setBrandKit(nextKit);
-    await fetch("/api/brand-kit", {
-      method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(nextKit),
-    });
-    notify("Logo & colors saved to Brand Kit");
-  };
-
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)]">
       <TopToolbar
@@ -1002,6 +1084,9 @@ export function StudioEditor({
         onPasteStyle={handlePasteStyle}
         hasCopiedStyle={!!copiedStyle}
         onOpenPhotoTab={() => setRailTab("photo")}
+        dataEditorOpen={dataEditorOpen}
+        onToggleDataEditor={() => setDataEditorOpen((o) => !o)}
+        customFonts={brandKit.customFonts}
       />
 
       {/* Main Studio Body */}
@@ -1043,32 +1128,71 @@ export function StudioEditor({
             onApplyBrandFont={handleApplyBrandFont}
             drawTool={drawTool}
             onChangeDrawTool={setDrawTool}
-            onOpenLogoMaker={() => setLogoMakerOpen(true)}
           />
         )}
 
         {/* Center Stage or Grid View */}
-        <div
-          ref={stageContainerRef}
-          className="flex min-w-0 flex-1 flex-col overflow-hidden"
-        >
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div
+            ref={stageContainerRef}
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
           {gridView ? (
             <div className="flex-1 overflow-y-auto bg-[var(--stage)] p-8">
+              {!readOnly && pages.length > 1 && (
+                <p className="mx-auto mb-4 max-w-5xl text-xs text-[var(--muted)]">
+                  Drag any slide card to reorder your deck. Click a slide to edit it.
+                </p>
+              )}
               <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {pages.map((p, idx) => (
                   <div
                     key={p.id}
+                    draggable={!readOnly}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", String(idx));
+                      setGridDragIdx(idx);
+                      setGridOverIdx(idx);
+                    }}
+                    onDragOver={(e) => {
+                      if (gridDragIdx === null) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      if (gridOverIdx !== idx) setGridOverIdx(idx);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const raw = e.dataTransfer.getData("text/plain");
+                      const from =
+                        raw !== "" && Number.isInteger(Number(raw)) ? Number(raw) : gridDragIdx;
+                      if (from !== null && from !== idx) {
+                        reorderPage(from, idx);
+                      }
+                      setGridDragIdx(null);
+                      setGridOverIdx(null);
+                    }}
+                    onDragEnd={() => {
+                      setGridDragIdx(null);
+                      setGridOverIdx(null);
+                    }}
                     onClick={() => {
                       setActivePageIdx(idx);
                       setGridView(false);
                     }}
-                    className={`flex flex-col overflow-hidden rounded-2xl border bg-[var(--surface)] p-3 shadow-md transition cursor-pointer ${
-                      idx === activePageIdx
-                        ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
-                        : "border-[var(--border)] hover:border-[var(--accent)]"
+                    className={`flex flex-col overflow-hidden rounded-2xl border bg-[var(--surface)] p-3 shadow-md transition select-none ${
+                      readOnly ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
+                    } ${
+                      gridDragIdx === idx
+                        ? "opacity-45 scale-[0.98]"
+                        : gridDragIdx !== null && gridOverIdx === idx
+                          ? "border-[var(--focus)] ring-2 ring-[var(--focus)]"
+                          : idx === activePageIdx
+                            ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
+                            : "border-[var(--border)] hover:border-[var(--accent)]"
                     }`}
                   >
-                    <div className="flex h-44 items-center justify-center rounded-xl bg-[var(--stage)] p-2">
+                    <div className="flex h-44 items-center justify-center rounded-xl bg-[var(--stage)] p-2 pointer-events-none">
                       <PagePreview page={p} width={width} height={height} maxWidth={260} maxHeight={160} />
                     </div>
                     <div className="mt-2.5 flex items-center justify-between text-xs">
@@ -1078,6 +1202,7 @@ export function StudioEditor({
                       {!readOnly && (
                         <div className="flex gap-1">
                           <button
+                            draggable={false}
                             onClick={(e) => {
                               e.stopPropagation();
                               duplicatePage(idx);
@@ -1088,6 +1213,7 @@ export function StudioEditor({
                           </button>
                           {pages.length > 1 && (
                             <button
+                              draggable={false}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 deletePage(idx);
@@ -1148,8 +1274,10 @@ export function StudioEditor({
               }}
               onQuickOpenUploads={() => setRailTab("uploads")}
               onQuickOpenTemplates={() => setRailTab("templates")}
+              onOpenDataEditor={() => setDataEditorOpen(true)}
             />
           )}
+          </div>
 
           {/* Speaker Notes Bar */}
           {notesOpen && !readOnly && (
@@ -1167,119 +1295,54 @@ export function StudioEditor({
             </div>
           )}
 
-          {/* Bottom Page Filmstrip + Zoom Controls */}
-          <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-t border-[var(--border)] bg-[var(--surface)] px-3">
-            <div className="flex items-center gap-2 overflow-x-auto py-1">
-              {pages.map((p, idx) => (
-                <div
-                  key={p.id}
-                  onClick={() => {
-                    setActivePageIdx(idx);
-                    setSelectedIds([]);
-                  }}
-                  className={`group flex shrink-0 items-center gap-2 rounded-lg border px-2 py-1 text-xs transition cursor-pointer ${
-                    idx === activePageIdx
-                      ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-semibold"
-                      : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--fg)]"
-                  }`}
-                >
-                  <span>{idx + 1}</span>
-                  <span className="max-w-[80px] truncate">{p.name}</span>
-                  {!readOnly && pages.length > 1 && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deletePage(idx);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-rose-500 cursor-pointer"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              {!readOnly && (
-                <>
-                  <button
-                    onClick={addPage}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-[var(--border)] px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add Page
-                  </button>
-                  <button
-                    onClick={() => duplicatePage(activePageIdx)}
-                    title="Duplicate current page"
-                    className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              )}
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2 text-xs">
-              {!readOnly && (
-                <button
-                  onClick={() => setNotesOpen((n) => !n)}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium cursor-pointer ${
-                    notesOpen
-                      ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-                      : "text-[var(--muted)] hover:bg-[var(--surface-2)]"
-                  }`}
-                >
-                  <FileText className="h-3.5 w-3.5" /> Notes
-                </button>
-              )}
-
-              <button
-                onClick={() => setGridView((g) => !g)}
-                className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium cursor-pointer ${
-                  gridView
-                    ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-                    : "text-[var(--muted)] hover:bg-[var(--surface-2)]"
-                }`}
-              >
-                <Grid className="h-3.5 w-3.5" /> Grid
-              </button>
-
-              <div className="h-4 w-px bg-[var(--border)]" />
-
-              <button
-                onClick={() => {
-                  setAutoFit(false);
-                  setZoom((z) => Math.max(0.15, +(z - 0.1).toFixed(2)));
-                }}
-                title="Zoom out"
-                aria-label="Zoom out"
-                className="rounded p-1 text-[var(--muted)] hover:bg-[var(--surface-2)] cursor-pointer"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => {
-                  setAutoFit(true);
-                  const fit = computeFitZoom();
-                  if (fit !== null) setZoom(fit);
-                }}
-                title="Fit canvas to screen (⌘0)"
-                className="w-12 rounded py-0.5 text-center font-semibold text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
-              >
-                {Math.round(zoom * 100)}%
-              </button>
-              <button
-                onClick={() => {
-                  setAutoFit(false);
-                  setZoom((z) => Math.min(2.5, +(z + 0.1).toFixed(2)));
-                }}
-                title="Zoom in"
-                aria-label="Zoom in"
-                className="rounded p-1 text-[var(--muted)] hover:bg-[var(--surface-2)] cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
+          {/* Bottom Canva-style Page Filmstrip + Zoom Controls */}
+          <PageStrip
+            pages={pages}
+            activePageIdx={activePageIdx}
+            width={width}
+            height={height}
+            readOnly={readOnly}
+            open={filmstripOpen}
+            onToggleOpen={() => setFilmstripOpen((v) => !v)}
+            notesOpen={notesOpen}
+            hasActiveNotes={Boolean(activePage.notes?.trim())}
+            onToggleNotes={() => setNotesOpen((n) => !n)}
+            gridView={gridView}
+            onToggleGridView={() => setGridView((g) => !g)}
+            zoom={zoom}
+            onZoomChange={(nextZoom) => {
+              setAutoFit(false);
+              setZoom(nextZoom);
+            }}
+            onFitZoom={() => {
+              setAutoFit(true);
+              const fit = computeFitZoom();
+              if (fit !== null) setZoom(fit);
+            }}
+            onSelectPage={(idx) => {
+              setActivePageIdx(idx);
+              setSelectedIds([]);
+              if (gridView) setGridView(false);
+            }}
+            onAddPage={addPage}
+            onDuplicatePage={duplicatePage}
+            onDeletePage={deletePage}
+            onReorderPage={reorderPage}
+          />
         </div>
+
+        {/* Chart & Table Data Editor Drawer */}
+        {!readOnly &&
+          dataEditorOpen &&
+          singleSelected &&
+          (singleSelected.type === "chart" || singleSelected.type === "table") && (
+            <DataEditorPanel
+              element={singleSelected}
+              brandColors={brandKit.colors}
+              onUpdate={handleUpdateElement}
+              onClose={() => setDataEditorOpen(false)}
+            />
+          )}
 
         {/* Comments Drawer */}
         <CommentsDrawer
@@ -1366,56 +1429,13 @@ export function StudioEditor({
         height={height}
       />
 
-      <LogoMakerModal
-        open={logoMakerOpen}
-        onClose={() => setLogoMakerOpen(false)}
-        onInsertOnCanvas={(logoName, dataUrl) => {
-          const size = Math.round(Math.min(width, height) * 0.34);
-          handleAddElement({
-            id: makeId("el"),
-            type: "image",
-            name: logoName,
-            src: dataUrl,
-            x: Math.round((width - size) / 2),
-            y: Math.round((height - size) / 2),
-            width: size,
-            height: size,
-            rotation: 0,
-            opacity: 1,
-            borderRadius: 0,
-            fit: "contain",
-            mask: "none",
-            filters: { ...DEFAULT_IMAGE_FILTERS },
-          });
-          notify(`Inserted "${logoName}" onto slide`);
-        }}
-        onOpenInEditor={async (logoTitle, page) => {
-          await persistDesign();
-          const res = await fetch("/api/designs", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title: logoTitle,
-              category: "logo",
-              width: 1000,
-              height: 1000,
-              pages: [page],
-            }),
-          });
-          const data = (await res.json().catch(() => null)) as { design?: DesignRecord } | null;
-          if (data?.design) {
-            router.push(`/design/${data.design.id}`);
-          } else {
-            notify("Could not create new logo file");
-          }
-        }}
-        onSaveToBrandKit={handleSaveLogoToBrand}
-      />
-
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-16 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-xl">
+        <div
+          className={`fixed left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-xl transition-all ${
+            filmstripOpen ? "bottom-32" : "bottom-12"
+          }`}
+        >
           {toast}
         </div>
       )}
