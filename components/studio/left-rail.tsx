@@ -12,7 +12,6 @@ import {
   Eye,
   EyeOff,
   FileUp,
-  Hexagon,
   Image as ImageIcon,
   Layers,
   LayoutTemplate,
@@ -34,9 +33,16 @@ import {
   X,
 } from "lucide-react";
 import { PagePreview } from "@/components/page-preview";
+import { isLightColor } from "@/lib/brand-style";
+import {
+  cleanFontNameFromFile,
+  fontFormatFromFile,
+  loadCustomFont,
+  readFontFileAsDataUrl,
+} from "@/lib/custom-fonts";
 import { VECTOR_ICONS } from "@/lib/icons";
 import { makeId } from "@/lib/id";
-import { applyCropToImage, readImageFileOptimized, removeBackgroundInBrowser } from "@/lib/photo-tools";
+import { applyCropToImage, loadImage, readImageFileOptimized, removeBackgroundInBrowser } from "@/lib/photo-tools";
 import { FILTER_PRESETS, FONT_PAIRINGS, GOOGLE_FONTS, SWATCH_PALETTES } from "@/lib/presets";
 import { BUILTIN_TEMPLATES, instantiateTemplate } from "@/lib/templates";
 import {
@@ -44,6 +50,7 @@ import {
   type BrandKit,
   type CanvasElement,
   type ChartKind,
+  type CustomFontItem,
   type DesignPage,
   type FrameMask,
   type ImageElement,
@@ -65,17 +72,76 @@ export type RailTab =
 const SHAPE_LIST: { kind: ShapeKind; label: string }[] = [
   { kind: "rect", label: "Rectangle" },
   { kind: "circle", label: "Circle" },
-  { kind: "pill", label: "Pill" },
+  { kind: "line", label: "Line" },
+  { kind: "arrow", label: "Arrow" },
   { kind: "triangle", label: "Triangle" },
+  { kind: "star", label: "Star" },
+  { kind: "pill", label: "Pill" },
   { kind: "diamond", label: "Diamond" },
   { kind: "pentagon", label: "Pentagon" },
   { kind: "hexagon", label: "Hexagon" },
-  { kind: "star", label: "Star" },
-  { kind: "arrow", label: "Arrow" },
   { kind: "bubble", label: "Speech" },
   { kind: "blob", label: "Blob" },
-  { kind: "line", label: "Line" },
 ];
+
+function ShapeThumb({ kind }: { kind: ShapeKind }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" className="text-[var(--fg)]/80">
+      {kind === "rect" && <rect x="3" y="5" width="18" height="14" rx="2.5" />}
+      {kind === "circle" && <circle cx="12" cy="12" r="8.5" />}
+      {kind === "pill" && <rect x="2.5" y="7" width="19" height="10" rx="5" />}
+      {kind === "triangle" && <polygon points="12,3.5 21,19.5 3,19.5" />}
+      {kind === "diamond" && <polygon points="12,2.5 21.5,12 12,21.5 2.5,12" />}
+      {kind === "pentagon" && <polygon points="12,2.5 21,9.2 17.6,20 6.4,20 3,9.2" />}
+      {kind === "hexagon" && <polygon points="7,3.5 17,3.5 21.5,12 17,20.5 7,20.5 2.5,12" />}
+      {kind === "star" && (
+        <polygon points="12,2.5 14.9,8.6 21.5,9.5 16.7,14.1 17.9,20.7 12,17.5 6.1,20.7 7.3,14.1 2.5,9.5 9.1,8.6" />
+      )}
+      {kind === "arrow" && (
+        <path d="M3 10h11V6l7 6-7 6v-4H3z" />
+      )}
+      {kind === "bubble" && (
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-8z" />
+      )}
+      {kind === "blob" && (
+        <path d="M12.6 3.2c3.5-.3 7.1 2 8 5.4.8 3.2-.6 6.8-3.1 9-2.4 2.1-6 3-9.1 1.7-3.1-1.3-5.6-4.7-5.3-8.1.3-3.5 3.3-6.1 6.6-7.3.9-.4 1.9-.6 2.9-.7z" />
+      )}
+      {kind === "line" && (
+        <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+      )}
+    </svg>
+  );
+}
+
+function ChartThumb({ kind }: { kind: ChartKind }) {
+  if (kind === "bar") {
+    return <BarChart3 className="h-4 w-4 text-[var(--muted)]" />;
+  }
+  if (kind === "line") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--muted)]">
+        <path d="M3 3v18h18" />
+        <path d="m7 15 4-4 3 3 5-6" />
+      </svg>
+    );
+  }
+  if (kind === "pie") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--muted)]">
+        <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+        <path d="M22 12A10 10 0 0 0 12 2v10z" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--muted)]">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="4.5" />
+      <path d="M12 3v4.5" />
+      <path d="M16.5 12H21" />
+    </svg>
+  );
+}
 
 const MASKS: { id: FrameMask; label: string }[] = [
   { id: "none", label: "None" },
@@ -117,7 +183,6 @@ export function LeftRail({
   onApplyBrandFont,
   drawTool,
   onChangeDrawTool,
-  onOpenLogoMaker,
 }: {
   activeTab: RailTab | null;
   onTabChange: (tab: RailTab | null) => void;
@@ -147,7 +212,10 @@ export function LeftRail({
   onImportPptx: (file: File) => Promise<void>;
   brandKit: BrandKit;
   pageCount: number;
-  onUpdateBrandKit: (next: BrandKit) => Promise<void> | void;
+  onUpdateBrandKit: (
+    next: BrandKit,
+    opts?: { immediate?: boolean; toast?: string },
+  ) => Promise<void> | void;
   onApplyBrandStyle: (opts?: {
     mode?: "all" | "colors" | "fonts";
     scope?: "page" | "deck";
@@ -168,50 +236,204 @@ export function LeftRail({
     color: string;
     strokeWidth: number;
   }) => void;
-  onOpenLogoMaker: () => void;
 }) {
   const [iconQuery, setIconQuery] = useState("");
+  const [elemCat, setElemCat] = useState<"all" | "shapes" | "charts" | "icons" | "qr">("all");
   const [tplFilter, setTplFilter] = useState<string>("all");
-  const [qrInput, setQrInput] = useState("https://mworld-slate.laflabs-tech.workers.dev");
+  const [qrInput, setQrInput] = useState("https://example.com");
   const [uploading, setUploading] = useState(false);
   const [bgTolerance, setBgTolerance] = useState(36);
   const [bgBusy, setBgBusy] = useState(false);
   const [editingBrand, setEditingBrand] = useState(false);
   const [applyScope, setApplyScope] = useState<"page" | "deck">("page");
+  const [googleFontInput, setGoogleFontInput] = useState("");
+  const [fontBusy, setFontBusy] = useState(false);
+  const [fontStatus, setFontStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pptxRef = useRef<HTMLInputElement>(null);
   const brandLogoRef = useRef<HTMLInputElement>(null);
+  const fontFileRef = useRef<HTMLInputElement>(null);
 
   const hasSelectedText = page.elements.some(
-    (el) => selectedIds.includes(el.id) && (el.type === "text" || el.type === "table"),
+    (el) => selectedIds.includes(el.id) && !el.locked && (el.type === "text" || el.type === "table"),
   );
+  const hasColorableSelection = page.elements.some(
+    (el) => selectedIds.includes(el.id) && !el.locked && el.type !== "image",
+  );
+
+  const handleUploadFontFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFontStatus(null);
+    if (file.size > 2 * 1024 * 1024) {
+      setFontStatus({ ok: false, msg: "Font file must be under 2 MB." });
+      e.target.value = "";
+      return;
+    }
+    setFontBusy(true);
+    try {
+      const dataUrl = await readFontFileAsDataUrl(file);
+      const name = cleanFontNameFromFile(file.name);
+      const item: CustomFontItem = {
+        id: makeId("fnt"),
+        name,
+        source: "upload",
+        dataUrl,
+        format: fontFormatFromFile(file.name),
+        createdAt: Date.now(),
+      };
+      const loaded = await loadCustomFont(item);
+      if (!loaded) {
+        setFontStatus({ ok: false, msg: "Could not parse this font file. Try TTF, OTF, or WOFF2." });
+        return;
+      }
+      const existing = (brandKit.customFonts ?? []).filter(
+        (f) => f.name.toLowerCase() !== name.toLowerCase(),
+      );
+      await onUpdateBrandKit(
+        {
+          ...brandKit,
+          customFonts: [item, ...existing].slice(0, 20),
+        },
+        { immediate: true },
+      );
+      onApplyBrandFont(name);
+      setFontStatus({ ok: true, msg: `Imported “${name}”` });
+    } catch {
+      setFontStatus({ ok: false, msg: "Failed to read font file." });
+    } finally {
+      setFontBusy(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleImportGoogleFont = async () => {
+    const raw = googleFontInput.trim();
+    if (!raw) return;
+    const cleanName = raw.replace(/["'\\<>]/g, "").replace(/\s+/g, " ").trim();
+    if (!cleanName) return;
+    setFontStatus(null);
+    setFontBusy(true);
+    try {
+      const item: CustomFontItem = {
+        id: makeId("fnt"),
+        name: cleanName,
+        source: "google",
+        createdAt: Date.now(),
+      };
+      const loaded = await loadCustomFont(item);
+      if (!loaded) {
+        setFontStatus({
+          ok: false,
+          msg: `Could not find “${cleanName}” on Google Fonts. Check spelling.`,
+        });
+        return;
+      }
+      const existing = (brandKit.customFonts ?? []).filter(
+        (f) => f.name.toLowerCase() !== cleanName.toLowerCase(),
+      );
+      await onUpdateBrandKit(
+        {
+          ...brandKit,
+          customFonts: [item, ...existing].slice(0, 20),
+        },
+        { immediate: true },
+      );
+      onApplyBrandFont(cleanName);
+      setGoogleFontInput("");
+      setFontStatus({ ok: true, msg: `Imported “${cleanName}” from Google Fonts` });
+    } finally {
+      setFontBusy(false);
+    }
+  };
+
+  const handleDeleteCustomFont = async (fontId: string) => {
+    await onUpdateBrandKit(
+      {
+        ...brandKit,
+        customFonts: (brandKit.customFonts ?? []).filter((f) => f.id !== fontId),
+      },
+      { immediate: true },
+    );
+  };
 
   const handleBrandLogoPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("Failed to read logo"));
-        reader.readAsDataURL(file);
-      });
-      await onUpdateBrandKit({
-        ...brandKit,
-        logos: [
-          {
-            id: makeId("logo"),
-            name: file.name.replace(/\.[^.]+$/, ""),
-            variant: "primary" as const,
-            dataUrl,
-            createdAt: Date.now(),
-          },
-          ...brandKit.logos,
-        ].slice(0, 12),
-      });
+      const opt = await readImageFileOptimized(file, 1024);
+      await onUpdateBrandKit(
+        {
+          ...brandKit,
+          logos: [
+            {
+              id: makeId("logo"),
+              name: file.name.replace(/\.[^.]+$/, ""),
+              variant: "primary" as const,
+              dataUrl: opt.dataUrl,
+              width: opt.width,
+              height: opt.height,
+              createdAt: Date.now(),
+            },
+            ...brandKit.logos,
+          ].slice(0, 12),
+        },
+        { immediate: true, toast: "Logo added to Brand Kit" },
+      );
     } finally {
       e.target.value = "";
     }
+  };
+
+  const handleDeleteBrandLogo = async (logoId: string) => {
+    await onUpdateBrandKit(
+      {
+        ...brandKit,
+        logos: brandKit.logos.filter((l) => l.id !== logoId),
+      },
+      { immediate: true, toast: "Logo removed from Brand Kit" },
+    );
+  };
+
+  const insertLogoOnCanvas = async (logo: BrandKit["logos"][number]) => {
+    let natW = logo.width || 0;
+    let natH = logo.height || 0;
+    if (!natW || !natH) {
+      try {
+        const img = await loadImage(logo.dataUrl);
+        natW = img.naturalWidth || 500;
+        natH = img.naturalHeight || 500;
+      } catch {
+        natW = 500;
+        natH = 500;
+      }
+    }
+    const maxW = width * 0.34;
+    const maxH = height * 0.28;
+    const ratio = natW / Math.max(1, natH);
+    let w = maxW;
+    let h = w / ratio;
+    if (h > maxH) {
+      h = maxH;
+      w = h * ratio;
+    }
+    onAddElement({
+      id: makeId("el"),
+      type: "image",
+      name: logo.name || "Brand Logo",
+      src: logo.dataUrl,
+      originalSrc: logo.dataUrl,
+      x: Math.round(centerX - w / 2),
+      y: Math.round(centerY - h / 2),
+      width: Math.max(40, Math.round(w)),
+      height: Math.max(40, Math.round(h)),
+      rotation: 0,
+      opacity: 1,
+      fit: "contain",
+      borderRadius: 0,
+      mask: "none",
+      filters: { ...DEFAULT_IMAGE_FILTERS },
+    });
   };
 
   const tabs: { id: RailTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -233,6 +455,7 @@ export function LeftRail({
     const fontSize = Math.round((preset === "heading" ? 72 : preset === "subheading" ? 42 : 26) * scale);
     const w = Math.round(Math.min(width * 0.72, 680 * scale));
     const h = Math.round(fontSize * 1.5);
+    const darkBg = !isLightColor(page.background || "#FFFFFF");
     onAddElement({
       id: makeId("el"),
       type: "text",
@@ -249,10 +472,16 @@ export function LeftRail({
       height: h,
       rotation: 0,
       opacity: 1,
-      fontFamily: fontFamily || (preset === "heading" ? brandKit.fonts.heading : brandKit.fonts.body),
+      fontFamily:
+        fontFamily ||
+        (preset === "heading"
+          ? brandKit.fonts.heading
+          : preset === "subheading"
+            ? brandKit.fonts.subheading
+            : brandKit.fonts.body),
       fontSize,
       fontWeight: preset === "heading" ? 800 : preset === "subheading" ? 600 : 400,
-      color: "#0F172A",
+      color: darkBg ? "#FFFFFF" : "#0F172A",
       align: "center",
       lineHeight: 1.2,
       letterSpacing: preset === "heading" ? -1 : 0,
@@ -300,6 +529,7 @@ export function LeftRail({
   const addChart = (kind: ChartKind) => {
     const w = Math.round(Math.min(width * 0.6, 560));
     const h = Math.round(Math.min(height * 0.48, 380));
+    const darkBg = !isLightColor(page.background || "#FFFFFF");
     onAddElement({
       id: makeId("el"),
       type: "chart",
@@ -313,7 +543,7 @@ export function LeftRail({
       rotation: 0,
       opacity: 1,
       accentColor: brandKit.colors[1] || "#4F46E5",
-      textColor: "#0F172A",
+      textColor: darkBg ? "#FFFFFF" : "#0F172A",
       showValues: true,
       data: [
         { label: "Q1", value: 38, color: "#4F46E5" },
@@ -359,7 +589,7 @@ export function LeftRail({
       id: makeId("el"),
       type: "qrcode",
       name: "QR Code",
-      value: qrInput.trim() || "https://mworld-slate.laflabs-tech.workers.dev",
+      value: qrInput.trim() || "https://slate.laflabs-tech.workers.dev",
       x: Math.round(centerX - size / 2),
       y: Math.round(centerY - size / 2),
       width: size,
@@ -513,6 +743,13 @@ export function LeftRail({
         onChange={handlePptxPick}
         className="hidden"
       />
+      <input
+        ref={fontFileRef}
+        type="file"
+        accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
+        onChange={handleUploadFontFile}
+        className="hidden"
+      />
 
       {/* Slim Icon Rail */}
       <div className="flex w-[68px] flex-col items-center gap-1 border-r border-[var(--border)] bg-[var(--surface)] py-2.5">
@@ -542,16 +779,6 @@ export function LeftRail({
             </button>
           );
         })}
-
-        <div className="my-1 h-px w-8 bg-[var(--border)]" />
-
-        <button
-          onClick={onOpenLogoMaker}
-          className="flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)] transition cursor-pointer"
-        >
-          <Hexagon className="h-4 w-4" />
-          <span>Logos</span>
-        </button>
       </div>
 
       {/* Expandable Drawer */}
@@ -635,92 +862,252 @@ export function LeftRail({
             )}
 
             {/* ELEMENTS */}
-            {activeTab === "elements" && (
-              <>
-                <div>
-                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">Shapes & Lines</div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {SHAPE_LIST.map((s) => (
-                      <button
-                        key={s.kind}
-                        onClick={() => addShape(s.kind)}
-                        className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-2.5 text-[11px] font-medium text-[var(--fg)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] transition cursor-pointer"
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+            {activeTab === "elements" && (() => {
+              const q = iconQuery.trim().toLowerCase();
+              const searching = q.length > 0;
+              const matchedShapes = searching
+                ? SHAPE_LIST.filter((s) => s.label.toLowerCase().includes(q) || s.kind.includes(q))
+                : elemCat === "all"
+                  ? SHAPE_LIST.slice(0, 8)
+                  : SHAPE_LIST;
+              const chartItems: { id: ChartKind; label: string }[] = [
+                { id: "bar", label: "Bar" },
+                { id: "line", label: "Line" },
+                { id: "pie", label: "Pie" },
+                { id: "donut", label: "Donut" },
+              ];
+              const matchedCharts = searching
+                ? chartItems.filter((c) => c.label.toLowerCase().includes(q) || "chart".includes(q))
+                : chartItems;
+              const showTable = !searching || "table".includes(q) || "grid".includes(q);
+              const visibleIcons = searching || elemCat === "icons" ? filteredIcons : filteredIcons.slice(0, 8);
+              const noResults =
+                searching &&
+                matchedShapes.length === 0 &&
+                matchedCharts.length === 0 &&
+                !showTable &&
+                visibleIcons.length === 0;
 
-                <div>
-                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">Charts & Tables</div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {(["bar", "line", "pie", "donut"] as const).map((ck) => (
-                      <button
-                        key={ck}
-                        onClick={() => addChart(ck)}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-2 text-xs font-medium capitalize text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
-                      >
-                        <BarChart3 className="h-3.5 w-3.5 text-[var(--accent)]" /> {ck}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={addTable}
-                    className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-2 text-xs font-medium text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
-                  >
-                    <TableIcon className="h-3.5 w-3.5 text-[var(--accent)]" /> Insert Editable Table
-                  </button>
-                </div>
-
-                <div>
-                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">QR Code Generator</div>
-                  <div className="flex gap-1.5">
-                    <input
-                      value={qrInput}
-                      onChange={(e) => setQrInput(e.target.value)}
-                      placeholder="URL or text…"
-                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-xs text-[var(--fg)] outline-none"
-                    />
-                    <button
-                      onClick={addQr}
-                      className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 text-xs font-semibold text-[var(--accent-fg)] cursor-pointer"
-                    >
-                      <QrCode className="h-3.5 w-3.5" /> Add
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 text-[11px] font-semibold text-[var(--muted)]">Vector Icons</div>
-                  <div className="relative mb-2">
+              return (
+                <div className="space-y-4">
+                  {/* Unified Search */}
+                  <div className="relative">
                     <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--muted)]" />
                     <input
                       value={iconQuery}
                       onChange={(e) => setIconQuery(e.target.value)}
-                      placeholder="Search icons (rocket, leaf, tech…)"
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-8 pr-2.5 text-xs text-[var(--fg)] outline-none"
+                      placeholder="Search shapes, charts, icons…"
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-8 pr-7 text-xs text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
                     />
-                  </div>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {filteredIcons.map((ic) => (
+                    {iconQuery && (
                       <button
-                        key={ic.id}
-                        onClick={() => addIcon(ic.id, ic.label)}
-                        title={ic.label}
-                        className="flex flex-col items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2.5 text-[var(--fg)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition cursor-pointer"
+                        onClick={() => setIconQuery("")}
+                        aria-label="Clear search"
+                        className="absolute right-2 top-1.5 rounded p-0.5 text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
                       >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          {ic.paths.map((d, idx) => (
-                            <path key={idx} d={d} />
-                          ))}
-                        </svg>
+                        <X className="h-3.5 w-3.5" />
                       </button>
-                    ))}
+                    )}
                   </div>
+
+                  {/* Category Tabs */}
+                  {!searching && (
+                    <div className="flex gap-1 rounded-xl bg-[var(--surface-2)] p-1">
+                      {(
+                        [
+                          { id: "all", label: "All" },
+                          { id: "shapes", label: "Shapes" },
+                          { id: "charts", label: "Charts" },
+                          { id: "icons", label: "Icons" },
+                          { id: "qr", label: "QR" },
+                        ] as const
+                      ).map((cat) => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setElemCat(cat.id)}
+                          className={`flex-1 rounded-lg py-1 text-[11px] font-medium transition cursor-pointer ${
+                            elemCat === cat.id
+                              ? "bg-[var(--surface)] text-[var(--fg)] shadow-xs"
+                              : "text-[var(--muted)] hover:text-[var(--fg)]"
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {noResults && (
+                    <div className="rounded-xl border border-dashed border-[var(--border)] py-8 text-center text-xs text-[var(--muted)]">
+                      No elements match “{iconQuery}”.
+                    </div>
+                  )}
+
+                  {/* Shapes Section */}
+                  {(searching ? matchedShapes.length > 0 : elemCat === "all" || elemCat === "shapes") && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-[var(--muted)]">Shapes & Lines</span>
+                        {!searching && elemCat === "all" && (
+                          <button
+                            onClick={() => setElemCat("shapes")}
+                            className="text-[11px] font-medium text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            See all ({SHAPE_LIST.length})
+                          </button>
+                        )}
+                      </div>
+                      <div
+                        className={
+                          elemCat === "shapes"
+                            ? "grid grid-cols-3 gap-2"
+                            : "grid grid-cols-4 gap-1.5"
+                        }
+                      >
+                        {matchedShapes.map((s) => (
+                          <button
+                            key={s.kind}
+                            onClick={() => addShape(s.kind)}
+                            title={s.label}
+                            className={`flex flex-col items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/70 text-[var(--fg)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] transition cursor-pointer ${
+                              elemCat === "shapes" ? "gap-1.5 py-3 px-2" : "aspect-square p-2"
+                            }`}
+                          >
+                            <ShapeThumb kind={s.kind} />
+                            {elemCat === "shapes" && (
+                              <span className="text-[10px] font-medium text-[var(--muted)]">{s.label}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Charts & Tables Section */}
+                  {(searching
+                    ? matchedCharts.length > 0 || showTable
+                    : elemCat === "all" || elemCat === "charts") && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-[var(--muted)]">Charts & Tables</span>
+                        {!searching && elemCat === "all" && (
+                          <button
+                            onClick={() => setElemCat("charts")}
+                            className="text-[11px] font-medium text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            See all
+                          </button>
+                        )}
+                      </div>
+                      {matchedCharts.length > 0 && (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {matchedCharts.map((c) => (
+                            <button
+                              key={c.id}
+                              onClick={() => addChart(c.id)}
+                              className={`flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/70 text-xs font-medium text-[var(--fg)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] transition cursor-pointer ${
+                                elemCat === "charts" ? "flex-col py-3.5" : "py-2.5 px-2.5"
+                              }`}
+                            >
+                              <ChartThumb kind={c.id} />
+                              <span>{elemCat === "charts" ? `${c.label} Chart` : c.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {showTable && (
+                        <button
+                          onClick={addTable}
+                          className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/70 py-2.5 text-xs font-medium text-[var(--fg)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] transition cursor-pointer"
+                        >
+                          <TableIcon className="h-4 w-4 text-[var(--muted)]" />
+                          Editable Table
+                        </button>
+                      )}
+                      {elemCat === "charts" && !searching && (
+                        <p className="mt-2.5 text-[11px] leading-relaxed text-[var(--muted)]">
+                          Click any chart or table to open the data editor on the right and customize labels, values, and colors.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Vector Icons Section */}
+                  {(searching ? visibleIcons.length > 0 : elemCat === "all" || elemCat === "icons") && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-[var(--muted)]">
+                          Icons {elemCat === "icons" ? `(${visibleIcons.length})` : ""}
+                        </span>
+                        {!searching && elemCat === "all" && (
+                          <button
+                            onClick={() => setElemCat("icons")}
+                            className="text-[11px] font-medium text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                          >
+                            See all ({VECTOR_ICONS.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {visibleIcons.map((ic) => (
+                          <button
+                            key={ic.id}
+                            onClick={() => addIcon(ic.id, ic.label)}
+                            title={ic.label}
+                            className="flex aspect-square items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/70 text-[var(--fg)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] transition cursor-pointer"
+                          >
+                            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                              {ic.paths.map((d, idx) => (
+                                <path key={idx} d={d} />
+                              ))}
+                            </svg>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* QR Code Section */}
+                  {!searching && elemCat === "all" && (
+                    <button
+                      onClick={() => setElemCat("qr")}
+                      className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/70 px-3 py-2.5 text-xs font-medium text-[var(--fg)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] transition cursor-pointer"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <QrCode className="h-4 w-4 text-[var(--muted)]" />
+                        QR Code Generator
+                      </span>
+                      <span className="text-[11px] text-[var(--muted)]">Open →</span>
+                    </button>
+                  )}
+
+                  {!searching && elemCat === "qr" && (
+                    <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/50 p-3.5">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-[var(--fg)]">
+                        <QrCode className="h-4 w-4 text-[var(--muted)]" />
+                        Generate QR Code
+                      </div>
+                      <p className="text-[11px] text-[var(--muted)]">
+                        Enter any website URL, link, or text to place a crisp scannable QR code on your canvas.
+                      </p>
+                      <input
+                        value={qrInput}
+                        onChange={(e) => setQrInput(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && addQr()}
+                        placeholder="https://example.com"
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-xs text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
+                      />
+                      <button
+                        onClick={addQr}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] py-2 text-xs font-semibold text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+                      >
+                        <QrCode className="h-3.5 w-3.5" /> Add QR Code to Canvas
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </>
-            )}
+              );
+            })()}
 
             {/* TEXT */}
             {activeTab === "text" && (
@@ -728,22 +1115,112 @@ export function LeftRail({
                 <div className="space-y-2">
                   <button
                     onClick={() => addText("heading")}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-3 text-left text-lg font-extrabold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-3 text-left text-lg font-extrabold text-[var(--fg)] hover:border-[var(--border-strong)] cursor-pointer"
                   >
                     Add a heading
                   </button>
                   <button
                     onClick={() => addText("subheading")}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-left text-sm font-semibold text-[var(--fg)] hover:border-[var(--accent)] cursor-pointer"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-left text-sm font-semibold text-[var(--fg)] hover:border-[var(--border-strong)] cursor-pointer"
                   >
                     Add a subheading
                   </button>
                   <button
                     onClick={() => addText("body")}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2 text-left text-xs text-[var(--muted)] hover:border-[var(--accent)] cursor-pointer"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2 text-left text-xs text-[var(--muted)] hover:border-[var(--border-strong)] cursor-pointer"
                   >
                     Add a little bit of body text
                   </button>
+                </div>
+
+                {/* Custom Fonts (Upload .ttf/.otf/.woff2 or import any Google Font) */}
+                <div className="space-y-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-[var(--fg)]">Import Fonts</span>
+                    <button
+                      onClick={() => fontFileRef.current?.click()}
+                      disabled={fontBusy}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] font-medium text-[var(--fg)] hover:border-[var(--border-strong)] disabled:opacity-50 cursor-pointer"
+                    >
+                      <Upload className="h-3 w-3" />
+                      {fontBusy ? "Loading…" : "Upload File"}
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+                    Upload <span className="font-medium text-[var(--fg)]">.ttf, .otf, .woff, .woff2</span> or import any Google Font by name.
+                  </p>
+
+                  <div className="flex gap-1.5">
+                    <input
+                      value={googleFontInput}
+                      onChange={(e) => {
+                        setGoogleFontInput(e.target.value);
+                        if (fontStatus) setFontStatus(null);
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && void handleImportGoogleFont()}
+                      placeholder="Google Font (e.g. Pacifico, Oswald)"
+                      className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[11px] text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
+                    />
+                    <button
+                      onClick={() => void handleImportGoogleFont()}
+                      disabled={fontBusy || !googleFontInput.trim()}
+                      className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-40 cursor-pointer"
+                    >
+                      Import
+                    </button>
+                  </div>
+
+                  {fontStatus && (
+                    <div
+                      className={`text-[11px] ${
+                        fontStatus.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"
+                      }`}
+                    >
+                      {fontStatus.msg}
+                    </div>
+                  )}
+
+                  {brandKit.customFonts && brandKit.customFonts.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <div className="text-[10px] font-medium text-[var(--muted)]">
+                        Imported ({brandKit.customFonts.length}) — click to {hasSelectedText ? "apply" : "insert"}
+                      </div>
+                      {brandKit.customFonts.map((cf) => (
+                        <div
+                          key={cf.id}
+                          className="group flex items-center justify-between gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 hover:border-[var(--border-strong)]"
+                        >
+                          <button
+                            onClick={() => {
+                              if (!onApplyBrandFont(cf.name)) {
+                                addText("heading", cf.name);
+                              }
+                            }}
+                            className="min-w-0 flex-1 truncate text-left text-xs font-medium text-[var(--fg)] cursor-pointer"
+                            style={{ fontFamily: `"${cf.name}", sans-serif` }}
+                            title={
+                              hasSelectedText
+                                ? `Apply ${cf.name} to selected text`
+                                : `Insert heading in ${cf.name}`
+                            }
+                          >
+                            {cf.name}
+                          </button>
+                          <span className="text-[9px] uppercase text-[var(--muted)]">
+                            {cf.source === "google" ? "Google" : cf.format === "opentype" ? "OTF" : cf.format === "woff2" ? "WOFF2" : "File"}
+                          </span>
+                          <button
+                            onClick={() => void handleDeleteCustomFont(cf.id)}
+                            title={`Remove ${cf.name}`}
+                            className="rounded p-0.5 text-[var(--muted)] opacity-0 transition hover:text-rose-500 group-hover:opacity-100 cursor-pointer"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1111,9 +1588,20 @@ export function LeftRail({
                 {/* Workspace Brand Kit Card */}
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="truncate font-semibold text-[var(--fg)]">{brandKit.name}</div>
+                    <div className="truncate font-semibold text-[var(--fg)]">
+                      {brandKit.name || "My Brand"}
+                    </div>
                     <button
-                      onClick={() => setEditingBrand((v) => !v)}
+                      onClick={() => {
+                        if (editingBrand) {
+                          const trimmed = brandKit.name.trim() || "My Brand";
+                          void onUpdateBrandKit(
+                            { ...brandKit, name: trimmed },
+                            { immediate: true, toast: "Brand Kit saved" },
+                          );
+                        }
+                        setEditingBrand((v) => !v);
+                      }}
                       className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--fg)] cursor-pointer"
                     >
                       {editingBrand ? (
@@ -1139,6 +1627,7 @@ export function LeftRail({
                           onChange={(e) =>
                             void onUpdateBrandKit({ ...brandKit, name: e.target.value })
                           }
+                          placeholder="My Brand"
                           className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
                         />
                       </div>
@@ -1163,10 +1652,13 @@ export function LeftRail({
                               {brandKit.colors.length > 2 && (
                                 <button
                                   onClick={() =>
-                                    void onUpdateBrandKit({
-                                      ...brandKit,
-                                      colors: brandKit.colors.filter((_, i) => i !== idx),
-                                    })
+                                    void onUpdateBrandKit(
+                                      {
+                                        ...brandKit,
+                                        colors: brandKit.colors.filter((_, i) => i !== idx),
+                                      },
+                                      { immediate: true },
+                                    )
                                   }
                                   title="Remove color"
                                   className="absolute -right-1 -top-1 rounded-full bg-neutral-900 p-0.5 text-white cursor-pointer"
@@ -1179,10 +1671,13 @@ export function LeftRail({
                           {brandKit.colors.length < 8 && (
                             <button
                               onClick={() =>
-                                void onUpdateBrandKit({
-                                  ...brandKit,
-                                  colors: [...brandKit.colors, "#2563EB"],
-                                })
+                                void onUpdateBrandKit(
+                                  {
+                                    ...brandKit,
+                                    colors: [...brandKit.colors, "#2563EB"],
+                                  },
+                                  { immediate: true },
+                                )
                               }
                               title="Add color"
                               className="flex h-7 w-7 items-center justify-center rounded-md border border-dashed border-[var(--border)] text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
@@ -1193,49 +1688,50 @@ export function LeftRail({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <div>
-                          <label className="text-[10px] font-medium text-[var(--muted)]">
-                            Heading font
-                          </label>
-                          <select
-                            value={brandKit.fonts.heading}
-                            onChange={(e) =>
-                              void onUpdateBrandKit({
-                                ...brandKit,
-                                fonts: { ...brandKit.fonts, heading: e.target.value },
-                              })
-                            }
-                            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--fg)] outline-none"
-                          >
-                            {GOOGLE_FONTS.map((f) => (
-                              <option key={f.name} value={f.name}>
-                                {f.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-medium text-[var(--muted)]">
-                            Body font
-                          </label>
-                          <select
-                            value={brandKit.fonts.body}
-                            onChange={(e) =>
-                              void onUpdateBrandKit({
-                                ...brandKit,
-                                fonts: { ...brandKit.fonts, body: e.target.value },
-                              })
-                            }
-                            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--fg)] outline-none"
-                          >
-                            {GOOGLE_FONTS.map((f) => (
-                              <option key={f.name} value={f.name}>
-                                {f.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                      <div className="space-y-1.5">
+                        {(
+                          [
+                            { key: "heading" as const, label: "Heading font" },
+                            { key: "subheading" as const, label: "Subheading font" },
+                            { key: "body" as const, label: "Body font" },
+                          ]
+                        ).map((slot) => (
+                          <div key={slot.key}>
+                            <label className="text-[10px] font-medium text-[var(--muted)]">
+                              {slot.label}
+                            </label>
+                            <select
+                              value={brandKit.fonts[slot.key]}
+                              onChange={(e) =>
+                                void onUpdateBrandKit(
+                                  {
+                                    ...brandKit,
+                                    fonts: { ...brandKit.fonts, [slot.key]: e.target.value },
+                                  },
+                                  { immediate: true },
+                                )
+                              }
+                              className="mt-0.5 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--fg)] outline-none"
+                            >
+                              {brandKit.customFonts && brandKit.customFonts.length > 0 && (
+                                <optgroup label="Custom Fonts">
+                                  {brandKit.customFonts.map((f) => (
+                                    <option key={f.id} value={f.name}>
+                                      {f.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              <optgroup label="Built-in Fonts">
+                                {GOOGLE_FONTS.map((f) => (
+                                  <option key={f.name} value={f.name}>
+                                    {f.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            </select>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ) : (
@@ -1305,7 +1801,11 @@ export function LeftRail({
                   <div className="mb-1.5 flex items-center justify-between">
                     <span className="font-semibold text-[var(--fg)]">Brand Colors</span>
                     <span className="text-[10px] text-[var(--muted)]">
-                      {selectedIds.length > 0 ? "Recolor selection" : "Set background"}
+                      {hasColorableSelection
+                        ? "Recolor selection"
+                        : selectedIds.length > 0
+                          ? "Select text/shape"
+                          : "Set background"}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1314,9 +1814,11 @@ export function LeftRail({
                         key={idx}
                         onClick={() => onApplySwatchColor(c)}
                         title={
-                          selectedIds.length > 0
+                          hasColorableSelection
                             ? `Apply ${c} to selection`
-                            : `Set page background to ${c}`
+                            : selectedIds.length > 0
+                              ? "Select text, shape, icon, chart, or table to recolor"
+                              : `Set page background to ${c}`
                         }
                         className="h-8 w-8 rounded-lg border border-black/15 shadow-xs transition hover:scale-105 cursor-pointer"
                         style={{ background: c }}
@@ -1337,6 +1839,7 @@ export function LeftRail({
                     {(
                       [
                         { kind: "heading" as const, label: "Heading", font: brandKit.fonts.heading },
+                        { kind: "subheading" as const, label: "Subheading", font: brandKit.fonts.subheading },
                         { kind: "body" as const, label: "Body", font: brandKit.fonts.body },
                       ]
                     ).map((slot) => (
@@ -1349,12 +1852,16 @@ export function LeftRail({
                             const applied = onApplyBrandFont(slot.font);
                             if (!applied) addText(slot.kind, slot.font);
                           }}
-                          className="min-w-0 flex-1 px-3 py-2 text-left cursor-pointer"
+                          className="min-w-0 flex-1 px-3 py-1.5 text-left cursor-pointer"
                         >
                           <div className="text-[10px] text-[var(--muted)]">{slot.label}</div>
                           <div
                             className={`truncate text-[var(--fg)] ${
-                              slot.kind === "heading" ? "text-sm font-bold" : "text-xs"
+                              slot.kind === "heading"
+                                ? "text-sm font-bold"
+                                : slot.kind === "subheading"
+                                  ? "text-xs font-semibold"
+                                  : "text-xs"
                             }`}
                             style={{ fontFamily: `"${slot.font}", sans-serif` }}
                           >
@@ -1377,40 +1884,46 @@ export function LeftRail({
                 <div>
                   <div className="mb-1.5 flex items-center justify-between font-semibold text-[var(--fg)]">
                     <span>Brand Logos</span>
-                    <div className="flex items-center gap-2 text-[11px] font-medium">
-                      <button
-                        onClick={() => brandLogoRef.current?.click()}
-                        className="text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
-                      >
-                        Upload
-                      </button>
-                      <button
-                        onClick={onOpenLogoMaker}
-                        className="text-[var(--fg)] hover:underline cursor-pointer"
-                      >
-                        + Create
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => brandLogoRef.current?.click()}
+                      className="text-[11px] font-medium text-[var(--muted)] hover:text-[var(--fg)] cursor-pointer"
+                    >
+                      + Upload
+                    </button>
                   </div>
                   {brandKit.logos.length === 0 ? (
                     <p className="text-[11px] text-[var(--muted)]">
-                      No brand logos saved yet. Upload one or generate a vector mark in Logo Studio.
+                      No brand logos saved yet. Upload a PNG or SVG logo to reuse across designs.
                     </p>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
                       {brandKit.logos.map((logo) => (
-                        <button
+                        <div
                           key={logo.id}
-                          onClick={() => insertImageOnCanvas(logo.dataUrl, logo.name, 500, 500)}
-                          title={`Insert ${logo.name}`}
-                          className="flex aspect-square items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2 hover:border-[var(--border-strong)] cursor-pointer"
+                          className="group relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)] transition hover:border-[var(--border-strong)]"
                         >
-                          <img
-                            src={logo.dataUrl}
-                            alt={logo.name}
-                            className="max-h-full max-w-full object-contain"
-                          />
-                        </button>
+                          <button
+                            onClick={() => void insertLogoOnCanvas(logo)}
+                            title={`Insert ${logo.name} onto canvas`}
+                            className="flex aspect-square w-full items-center justify-center p-2.5 cursor-pointer"
+                          >
+                            <img
+                              src={logo.dataUrl}
+                              alt={logo.name}
+                              className="max-h-full max-w-full object-contain"
+                            />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDeleteBrandLogo(logo.id);
+                            }}
+                            title={`Remove ${logo.name} from Brand Logos`}
+                            className="absolute right-1.5 top-1.5 rounded-md bg-black/70 p-1 text-white opacity-0 transition group-hover:opacity-100 focus:opacity-100 hover:bg-rose-600 cursor-pointer"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -1447,7 +1960,7 @@ export function LeftRail({
                             {p.colors.map((c) => (
                               <span
                                 key={c}
-                                className="h-3.5 w-3.5 rounded-full border border-black/15"
+                                className="h-3 w-3 rounded-full border border-black/15"
                                 style={{ background: c }}
                               />
                             ))}
@@ -1455,13 +1968,16 @@ export function LeftRail({
                         </button>
                         <button
                           onClick={() =>
-                            void onUpdateBrandKit({
-                              ...brandKit,
-                              colors: [...p.colors],
-                            })
+                            void onUpdateBrandKit(
+                              {
+                                ...brandKit,
+                                colors: [...p.colors],
+                              },
+                              { immediate: true, toast: `Saved "${p.name}" to Brand Colors` },
+                            )
                           }
                           title={`Save ${p.name} as your Brand Colors`}
-                          className="hidden shrink-0 rounded px-1.5 py-1 text-[10px] font-medium text-[var(--muted)] group-hover:inline-flex hover:bg-[var(--surface)] hover:text-[var(--fg)] cursor-pointer"
+                          className="shrink-0 rounded px-1.5 py-1 text-[10px] font-medium text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--fg)] cursor-pointer"
                         >
                           Save
                         </button>
