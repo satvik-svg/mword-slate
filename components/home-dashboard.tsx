@@ -8,7 +8,6 @@ import {
   FileUp,
   Folder,
   FolderPlus,
-  Hexagon,
   Home,
   Image as ImageIcon,
   LayoutGrid,
@@ -25,18 +24,18 @@ import {
   Star,
   Sun,
   Trash2,
-  Upload,
   X,
 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
-import { LogoMakerModal } from "@/components/logo-maker-modal";
+import { BrandKitView } from "@/components/brand-kit-view";
 import { PagePreview } from "@/components/page-preview";
 import { SlateWordmark } from "@/components/slate-logo";
+import { syncCustomFonts } from "@/lib/custom-fonts";
 import { generateThumbnail } from "@/lib/exporter";
 import { makeId } from "@/lib/id";
 import { readImageFileOptimized } from "@/lib/photo-tools";
 import { importPptxFile } from "@/lib/pptx-import";
-import { FORMAT_PRESETS, GOOGLE_FONTS } from "@/lib/presets";
+import { FORMAT_PRESETS } from "@/lib/presets";
 import { BUILTIN_TEMPLATES, instantiateTemplate } from "@/lib/templates";
 import { workspaceLabel } from "@/lib/tenant";
 import {
@@ -80,7 +79,6 @@ export function HomeDashboard() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const [logoModalOpen, setLogoModalOpen] = useState(false);
   const [newDesignModalOpen, setNewDesignModalOpen] = useState(false);
   const [customW, setCustomW] = useState(1920);
   const [customH, setCustomH] = useState(1080);
@@ -117,7 +115,10 @@ export function HomeDashboard() {
       }
       if (bRes.ok) {
         const b = (await bRes.json()) as { brandKit?: BrandKit };
-        if (b.brandKit) setBrandKit(b.brandKit);
+        if (b.brandKit) {
+          setBrandKit(b.brandKit);
+          void syncCustomFonts(b.brandKit.customFonts);
+        }
       }
       if (tRes.ok) {
         const t = (await tRes.json()) as { templates?: TemplateRecord[] };
@@ -377,12 +378,16 @@ export function HomeDashboard() {
 
   const saveBrand = async (nextKit: BrandKit) => {
     setBrandKit(nextKit);
-    await fetch("/api/brand-kit", {
+    const res = await fetch("/api/brand-kit", {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(nextKit),
     });
+    if (!res.ok) {
+      showError("Could not save Brand Kit changes. Try a smaller file.");
+      return;
+    }
     setBrandSaved(true);
     setTimeout(() => setBrandSaved(false), 1800);
   };
@@ -396,9 +401,15 @@ export function HomeDashboard() {
       name: file.name.replace(/\.[^.]+$/, ""),
       variant: "primary",
       dataUrl: opt.dataUrl,
+      width: opt.width,
+      height: opt.height,
       createdAt: Date.now(),
     };
-    await saveBrand({ ...brandKit, logos: [item, ...brandKit.logos], updatedAt: Date.now() });
+    await saveBrand({
+      ...brandKit,
+      logos: [item, ...brandKit.logos].slice(0, 12),
+      updatedAt: Date.now(),
+    });
     e.target.value = "";
   };
 
@@ -511,14 +522,6 @@ export function HomeDashboard() {
               </button>
             );
           })}
-
-          <button
-            onClick={() => setLogoModalOpen(true)}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[var(--muted)] transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
-          >
-            <Hexagon className="h-4 w-4 shrink-0" />
-            Logo studio
-          </button>
 
           <div className="my-2.5 h-px bg-[var(--border)]" />
 
@@ -1046,164 +1049,14 @@ export function HomeDashboard() {
 
             {/* BRAND KIT TAB */}
             {section === "brand" && (
-              <section className="mx-auto max-w-3xl space-y-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h1 className="text-lg font-semibold tracking-tight text-[var(--fg)]">
-                      Brand kit
-                    </h1>
-                    <p className="mt-0.5 text-xs text-[var(--muted)]">
-                      Shared colors, logos, and typography available across your workspace.
-                    </p>
-                  </div>
-                  {brandSaved && (
-                    <span className="rounded-md bg-[var(--surface-2)] px-2.5 py-1 text-xs font-medium text-[var(--fg)]">
-                      Saved
-                    </span>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 space-y-6">
-                  <div>
-                    <label className="text-xs font-medium text-[var(--muted)]">Brand name</label>
-                    <input
-                      value={brandKit.name}
-                      onChange={(e) => setBrandKit({ ...brandKit, name: e.target.value })}
-                      onBlur={() => void saveBrand(brandKit)}
-                      className="mt-1.5 w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 px-3 py-2 text-sm text-[var(--fg)] outline-none focus:border-[var(--border-strong)]"
-                    />
-                  </div>
-
-                  {/* Logos */}
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-[var(--muted)]">Logos</span>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => brandLogoInputRef.current?.click()}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--fg)] hover:bg-[var(--surface-2)] cursor-pointer"
-                        >
-                          <Upload className="h-3.5 w-3.5" /> Upload
-                        </button>
-                        <button
-                          onClick={() => setLogoModalOpen(true)}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
-                        >
-                          <Hexagon className="h-3.5 w-3.5" /> Create logo
-                        </button>
-                      </div>
-                    </div>
-                    {brandKit.logos.length === 0 ? (
-                      <div className="mt-3 rounded-lg border border-dashed border-[var(--border)] p-6 text-center text-xs text-[var(--muted)]">
-                        Upload your brand marks or generate vector logos in Logo Studio.
-                      </div>
-                    ) : (
-                      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        {brandKit.logos.map((logo) => (
-                          <div
-                            key={logo.id}
-                            className="group relative flex flex-col items-center rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 p-3"
-                          >
-                            <img
-                              src={logo.dataUrl}
-                              alt={logo.name}
-                              className="h-20 w-20 object-contain"
-                            />
-                            <div className="mt-2 truncate w-full text-center text-[11px] font-medium">
-                              {logo.name}
-                            </div>
-                            <button
-                              onClick={() =>
-                                void saveBrand({
-                                  ...brandKit,
-                                  logos: brandKit.logos.filter((l) => l.id !== logo.id),
-                                })
-                              }
-                              className="absolute right-1.5 top-1.5 rounded bg-black/70 p-1 text-white opacity-0 group-hover:opacity-100 cursor-pointer"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Colors */}
-                  <div>
-                    <span className="text-xs font-medium text-[var(--muted)]">Color palette</span>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-3">
-                      {brandKit.colors.map((c, idx) => (
-                        <div key={idx} className="flex flex-col items-center gap-1">
-                          <div className="relative">
-                            <input
-                              type="color"
-                              value={c}
-                              onChange={(e) => {
-                                const next = [...brandKit.colors];
-                                next[idx] = e.target.value;
-                                void saveBrand({ ...brandKit, colors: next });
-                              }}
-                              className="h-10 w-10 cursor-pointer rounded-lg border border-[var(--border)]"
-                            />
-                            {brandKit.colors.length > 2 && (
-                              <button
-                                onClick={() =>
-                                  void saveBrand({
-                                    ...brandKit,
-                                    colors: brandKit.colors.filter((_, i) => i !== idx),
-                                  })
-                                }
-                                className="absolute -right-1.5 -top-1.5 rounded-full bg-neutral-900 p-0.5 text-white cursor-pointer"
-                              >
-                                <X className="h-2.5 w-2.5" />
-                              </button>
-                            )}
-                          </div>
-                          <span className="text-[10px] font-mono text-[var(--muted)]">{c}</span>
-                        </div>
-                      ))}
-                      {brandKit.colors.length < 10 && (
-                        <button
-                          onClick={() =>
-                            void saveBrand({ ...brandKit, colors: [...brandKit.colors, "#2563EB"] })
-                          }
-                          className="flex h-10 w-10 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)] hover:text-[var(--fg)] cursor-pointer"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Typography */}
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    {(["heading", "subheading", "body"] as const).map((slot) => (
-                      <div key={slot}>
-                        <label className="text-xs font-medium capitalize text-[var(--muted)]">
-                          {slot} font
-                        </label>
-                        <select
-                          value={brandKit.fonts[slot]}
-                          onChange={(e) =>
-                            void saveBrand({
-                              ...brandKit,
-                              fonts: { ...brandKit.fonts, [slot]: e.target.value },
-                            })
-                          }
-                          className="mt-1.5 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/60 px-3 py-2 text-xs text-[var(--fg)] outline-none"
-                        >
-                          {GOOGLE_FONTS.map((f) => (
-                            <option key={f.name} value={f.name}>
-                              {f.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
+              <BrandKitView
+                brandKit={brandKit}
+                brandSaved={brandSaved}
+                onChangeDraft={setBrandKit}
+                onSaveBrand={saveBrand}
+                onUploadLogo={() => brandLogoInputRef.current?.click()}
+                onError={showError}
+              />
             )}
           </div>
         </div>
@@ -1327,30 +1180,6 @@ export function HomeDashboard() {
           </div>
         </div>
       )}
-
-      {/* Logo Studio Modal */}
-      <LogoMakerModal
-        open={logoModalOpen}
-        onClose={() => setLogoModalOpen(false)}
-        onOpenInEditor={async (logoTitle, page) => {
-          await createAndOpen({
-            title: logoTitle,
-            category: "logo",
-            width: 1000,
-            height: 1000,
-            pages: [page],
-          });
-        }}
-        onSaveToBrandKit={async (logos, colors, font) => {
-          await saveBrand({
-            ...brandKit,
-            logos: [...logos, ...brandKit.logos].slice(0, 12),
-            colors: Array.from(new Set([...colors, ...brandKit.colors])).slice(0, 8),
-            fonts: { ...brandKit.fonts, heading: font },
-            updatedAt: Date.now(),
-          });
-        }}
-      />
 
       {/* Busy Overlay */}
       {busyMsg && (
