@@ -4,9 +4,9 @@ import { GOOGLE_FONTS_URL } from "@/lib/presets";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Slate — MWorld Design Studio",
+  title: "Slate — Visual Design Studio",
   description:
-    "Create presentations, social graphics, posters, edited photos, brand kits, and vector logos in MWorld Slate.",
+    "Create presentations, social graphics, posters, edited photos, brand kits, and vector logos in Slate.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
