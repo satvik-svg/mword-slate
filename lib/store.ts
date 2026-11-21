@@ -301,12 +301,23 @@ export async function getBrandKit(biId: string): Promise<BrandKit> {
   }>("select name, logos_json, colors_json, fonts_json, updated_at from brand_kits where bi_id = ?", [
     biId,
   ]);
-  if (!rows[0]) return { ...DEFAULT_BRAND_KIT };
+  if (!rows[0]) return { ...DEFAULT_BRAND_KIT, customFonts: [] };
+  const rawFonts = asJson<{
+    heading?: string;
+    subheading?: string;
+    body?: string;
+    custom?: BrandKit["customFonts"];
+  }>(rows[0].fonts_json, DEFAULT_BRAND_KIT.fonts);
   return {
     name: rows[0].name || DEFAULT_BRAND_KIT.name,
     logos: asJson(rows[0].logos_json, DEFAULT_BRAND_KIT.logos),
     colors: asJson(rows[0].colors_json, DEFAULT_BRAND_KIT.colors),
-    fonts: asJson(rows[0].fonts_json, DEFAULT_BRAND_KIT.fonts),
+    fonts: {
+      heading: rawFonts.heading || DEFAULT_BRAND_KIT.fonts.heading,
+      subheading: rawFonts.subheading || DEFAULT_BRAND_KIT.fonts.subheading,
+      body: rawFonts.body || DEFAULT_BRAND_KIT.fonts.body,
+    },
+    customFonts: Array.isArray(rawFonts.custom) ? rawFonts.custom : [],
     updatedAt: Number(rows[0].updated_at) || Date.now(),
   };
 }
@@ -318,7 +329,12 @@ export async function saveBrandKit(biId: string, kit: Partial<BrandKit>): Promis
     logos: kit.logos ?? existing.logos,
     colors: kit.colors ?? existing.colors,
     fonts: kit.fonts ?? existing.fonts,
+    customFonts: kit.customFonts ?? existing.customFonts ?? [],
     updatedAt: Date.now(),
+  };
+  const fontsPayload = {
+    ...next.fonts,
+    custom: next.customFonts ?? [],
   };
   await transact([
     {
@@ -335,7 +351,7 @@ export async function saveBrandKit(biId: string, kit: Partial<BrandKit>): Promis
         next.name,
         JSON.stringify(next.logos),
         JSON.stringify(next.colors),
-        JSON.stringify(next.fonts),
+        JSON.stringify(fontsPayload),
         next.updatedAt,
       ],
     },
