@@ -1,9 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "mworld-slate",
+  "name": "slate",
   "main": "cloudflare-worker.ts",
   "compatibility_date": "2026-11-12",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
   "upload_source_maps": true,
   "assets": {
     "directory": ".open-next/assets",
@@ -30,6 +31,6 @@
     "MAUTH_ENABLED": "true",
     "MAUTH_API_URL": "https://api.mauth.mworld.cloud",
     "MAUTH_VERIFY_URL": "https://api.mauth.mworld.cloud/mAuthAG/verifyToken",
-    "APP_ORIGIN": "https://mworld-slate.laflabs-tech.workers.dev"
+    "APP_ORIGIN": "https://slate.laflabs-tech.workers.dev"
   }
 }
