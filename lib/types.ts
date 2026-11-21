@@ -290,6 +290,17 @@ export type BrandLogoItem = {
   name: string;
   variant: "primary" | "dark" | "icon";
   dataUrl: string;
+  width?: number;
+  height?: number;
+  createdAt: number;
+};
+
+export type CustomFontItem = {
+  id: string;
+  name: string;
+  source: "upload" | "google";
+  dataUrl?: string;
+  format?: string;
   createdAt: number;
 };
 
@@ -302,6 +313,7 @@ export type BrandKit = {
     subheading: string;
     body: string;
   };
+  customFonts?: CustomFontItem[];
   updatedAt: number;
 };
 
