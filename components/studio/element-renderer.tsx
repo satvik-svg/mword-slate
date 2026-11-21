@@ -190,7 +190,7 @@ function QrView({ el }: { el: QrCodeElement }) {
   const [src, setSrc] = useState("");
   useEffect(() => {
     let active = true;
-    void QRCode.toDataURL(el.value || "https://mworld-slate.laflabs-tech.workers.dev", {
+    void QRCode.toDataURL(el.value || "https://slate.laflabs-tech.workers.dev", {
       width: 360,
       margin: 1,
       color: { dark: el.fgColor || "#0F172A", light: el.bgColor || "#FFFFFF" },
@@ -215,18 +215,25 @@ function QrView({ el }: { el: QrCodeElement }) {
 }
 
 function ChartView({ el }: { el: ChartElement }) {
-  const palette = ["#4F46E5", "#06B6D4", "#F43F5E", "#10B981", "#F59E0B", "#8B5CF6"];
+  const palette = ["#4F46E5", "#06B6D4", "#F43F5E", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6"];
   const data = el.data.length ? el.data : [{ label: "A", value: 10 }];
-  const maxVal = Math.max(1, ...data.map((d) => d.value));
-  const titleH = el.title ? 40 : 10;
-  const chartH = Math.max(40, el.height - titleH - 42);
+  const maxVal = Math.max(1, ...data.map((d) => Math.max(0, d.value)));
+  const titleH = el.title ? 40 : 12;
   const chartW = Math.max(40, el.width - 32);
 
   if (el.chartKind === "pie" || el.chartKind === "donut") {
     const total = data.reduce((s, d) => s + Math.max(0, d.value), 0) || 1;
-    const r = Math.min(chartW, chartH) * 0.42;
-    const cx = el.width * 0.38;
-    const cy = titleH + chartH / 2 + 8;
+    const isDonut = el.chartKind === "donut";
+    const availH = Math.max(40, el.height - titleH - 16);
+    const r = Math.max(20, Math.min(el.width * 0.28, availH * 0.44));
+    const innerR = r * 0.56;
+    const cx = Math.max(r + 16, el.width * 0.32);
+    const cy = titleH + availH / 2;
+    const legendX = cx + r + 24;
+    const legendRowH = Math.min(28, Math.max(18, Math.floor(availH / Math.max(1, data.length))));
+    const legendFontSize = Math.min(15, Math.max(11, Math.floor(legendRowH * 0.58)));
+    const legendTop = Math.max(titleH + 8, cy - (data.length * legendRowH) / 2);
+
     const slices = data.reduce<
       {
         start: number;
@@ -236,19 +243,31 @@ function ChartView({ el }: { el: ChartElement }) {
         d: (typeof data)[number];
       }[]
     >((acc, d, idx) => {
-      const start = idx === 0 ? -Math.PI / 2 : acc[idx - 1].start + (Math.max(0, data[idx - 1].value) / total) * Math.PI * 2;
+      const start =
+        idx === 0
+          ? -Math.PI / 2
+          : acc[idx - 1].start + (Math.max(0, data[idx - 1].value) / total) * Math.PI * 2;
       const span = (Math.max(0, d.value) / total) * Math.PI * 2;
-      const x1 = cx + r * Math.cos(start);
-      const y1 = cy + r * Math.sin(start);
       const end = start + span;
-      const x2 = cx + r * Math.cos(end);
-      const y2 = cy + r * Math.sin(end);
-      const large = span > Math.PI ? 1 : 0;
-      const path =
-        span >= Math.PI * 1.999
-          ? ""
-          : `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
-      acc.push({ start, path, full: span >= Math.PI * 1.999, color: d.color || palette[idx % palette.length], d });
+      const full = span >= Math.PI * 1.999;
+      let path = "";
+      if (!full && span > 0.0001) {
+        const large = span > Math.PI ? 1 : 0;
+        const x1 = cx + r * Math.cos(start);
+        const y1 = cy + r * Math.sin(start);
+        const x2 = cx + r * Math.cos(end);
+        const y2 = cy + r * Math.sin(end);
+        if (isDonut) {
+          const ix1 = cx + innerR * Math.cos(end);
+          const iy1 = cy + innerR * Math.sin(end);
+          const ix2 = cx + innerR * Math.cos(start);
+          const iy2 = cy + innerR * Math.sin(start);
+          path = `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerR} ${innerR} 0 ${large} 0 ${ix2} ${iy2} Z`;
+        } else {
+          path = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+        }
+      }
+      acc.push({ start, path, full, color: d.color || palette[idx % palette.length], d });
       return acc;
     }, []);
 
@@ -261,17 +280,41 @@ function ChartView({ el }: { el: ChartElement }) {
         )}
         {slices.map((s, idx) =>
           s.full ? (
-            <circle key={idx} cx={cx} cy={cy} r={r} fill={s.color} />
-          ) : (
+            isDonut ? (
+              <circle
+                key={idx}
+                cx={cx}
+                cy={cy}
+                r={(r + innerR) / 2}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={r - innerR}
+              />
+            ) : (
+              <circle key={idx} cx={cx} cy={cy} r={r} fill={s.color} />
+            )
+          ) : s.path ? (
             <path key={idx} d={s.path} fill={s.color} />
-          ),
+          ) : null,
         )}
-        {el.chartKind === "donut" && <circle cx={cx} cy={cy} r={r * 0.54} fill="#FFFFFF" />}
         {data.map((d, idx) => (
-          <g key={idx} transform={`translate(${cx + r + 24}, ${titleH + 18 + idx * 30})`}>
-            <rect width={14} height={14} rx={3} fill={d.color || palette[idx % palette.length]} />
-            <text x={22} y={12} fill={el.textColor} fontFamily="Inter, sans-serif" fontSize={16} fontWeight={500}>
-              {d.label} ({d.value})
+          <g key={idx} transform={`translate(${legendX}, ${legendTop + idx * legendRowH})`}>
+            <rect
+              y={Math.max(0, (legendRowH - 12) / 2)}
+              width={12}
+              height={12}
+              rx={3}
+              fill={d.color || palette[idx % palette.length]}
+            />
+            <text
+              x={18}
+              y={legendRowH / 2 + legendFontSize * 0.35}
+              fill={el.textColor}
+              fontFamily="Inter, sans-serif"
+              fontSize={legendFontSize}
+              fontWeight={500}
+            >
+              {el.showValues !== false ? `${d.label} (${d.value})` : d.label}
             </text>
           </g>
         ))}
@@ -280,11 +323,14 @@ function ChartView({ el }: { el: ChartElement }) {
   }
 
   if (el.chartKind === "line") {
+    const topPad = titleH + 24;
+    const drawH = Math.max(30, el.height - topPad - 36);
     const pts = data.map((d, idx) => ({
-      x: 24 + (idx / Math.max(1, data.length - 1)) * (chartW - 16),
-      y: titleH + 12 + chartH - (d.value / maxVal) * chartH,
+      x: 28 + (data.length === 1 ? (chartW - 24) / 2 : (idx / (data.length - 1)) * (chartW - 24)),
+      y: topPad + drawH - (Math.max(0, d.value) / maxVal) * drawH,
       label: d.label,
       value: d.value,
+      color: d.color || el.accentColor,
     }));
     const poly = pts.map((p) => `${p.x},${p.y}`).join(" ");
     return (
@@ -294,15 +340,27 @@ function ChartView({ el }: { el: ChartElement }) {
             {el.title}
           </text>
         )}
+        {[0, 0.5, 1].map((t) => (
+          <line
+            key={t}
+            x1={16}
+            x2={el.width - 16}
+            y1={topPad + drawH * t}
+            y2={topPad + drawH * t}
+            stroke={el.textColor}
+            strokeOpacity={0.14}
+            strokeWidth={1}
+          />
+        ))}
         <polyline points={poly} fill="none" stroke={el.accentColor} strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" />
         {pts.map((p, idx) => (
           <g key={idx}>
-            <circle cx={p.x} cy={p.y} r={6} fill={el.accentColor} />
-            <text x={p.x} y={titleH + chartH + 34} textAnchor="middle" fill={el.textColor} fontSize={14} fontFamily="Inter, sans-serif">
+            <circle cx={p.x} cy={p.y} r={6} fill={p.color} />
+            <text x={p.x} y={topPad + drawH + 24} textAnchor="middle" fill={el.textColor} fontSize={13} fontFamily="Inter, sans-serif">
               {p.label}
             </text>
-            {el.showValues && (
-              <text x={p.x} y={p.y - 12} textAnchor="middle" fill={el.textColor} fontSize={14} fontWeight={600} fontFamily="Inter, sans-serif">
+            {el.showValues !== false && (
+              <text x={p.x} y={p.y - 12} textAnchor="middle" fill={el.textColor} fontSize={13} fontWeight={600} fontFamily="Inter, sans-serif">
                 {p.value}
               </text>
             )}
@@ -312,8 +370,12 @@ function ChartView({ el }: { el: ChartElement }) {
     );
   }
 
-  const gap = 16;
-  const barW = Math.max(16, (chartW - gap * (data.length - 1)) / data.length);
+  // Bar chart
+  const topPad = titleH + 24;
+  const drawH = Math.max(30, el.height - topPad - 36);
+  const gap = Math.max(6, Math.min(18, Math.floor(chartW / Math.max(4, data.length * 4))));
+  const barW = Math.max(10, (chartW - gap * Math.max(0, data.length - 1)) / data.length);
+  const labelFontSize = Math.min(14, Math.max(10, Math.floor(barW * 0.28)));
   return (
     <svg width="100%" height="100%" viewBox={`0 0 ${el.width} ${el.height}`} className="block">
       {el.title && (
@@ -321,18 +383,50 @@ function ChartView({ el }: { el: ChartElement }) {
           {el.title}
         </text>
       )}
+      <line
+        x1={14}
+        x2={el.width - 14}
+        y1={topPad + drawH}
+        y2={topPad + drawH}
+        stroke={el.textColor}
+        strokeOpacity={0.2}
+        strokeWidth={1.5}
+      />
       {data.map((d, idx) => {
-        const bh = Math.max(6, (d.value / maxVal) * chartH);
+        const bh = Math.max(4, (Math.max(0, d.value) / maxVal) * drawH);
         const bx = 16 + idx * (barW + gap);
-        const by = titleH + 12 + chartH - bh;
+        const by = topPad + drawH - bh;
         return (
           <g key={idx}>
-            <rect x={bx} y={by} width={barW} height={bh} rx={8} fill={d.color || el.accentColor || palette[idx % palette.length]} />
-            <text x={bx + barW / 2} y={titleH + chartH + 34} textAnchor="middle" fill={el.textColor} fontSize={14} fontWeight={500} fontFamily="Inter, sans-serif">
+            <rect
+              x={bx}
+              y={by}
+              width={barW}
+              height={bh}
+              rx={Math.min(8, barW / 4)}
+              fill={d.color || el.accentColor || palette[idx % palette.length]}
+            />
+            <text
+              x={bx + barW / 2}
+              y={topPad + drawH + 22}
+              textAnchor="middle"
+              fill={el.textColor}
+              fontSize={labelFontSize}
+              fontWeight={500}
+              fontFamily="Inter, sans-serif"
+            >
               {d.label}
             </text>
-            {el.showValues && (
-              <text x={bx + barW / 2} y={by - 8} textAnchor="middle" fill={el.textColor} fontSize={14} fontWeight={700} fontFamily="Inter, sans-serif">
+            {el.showValues !== false && (
+              <text
+                x={bx + barW / 2}
+                y={by - 8}
+                textAnchor="middle"
+                fill={el.textColor}
+                fontSize={labelFontSize}
+                fontWeight={700}
+                fontFamily="Inter, sans-serif"
+              >
                 {d.value}
               </text>
             )}
