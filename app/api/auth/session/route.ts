@@ -1,4 +1,5 @@
 import { jsonError, mauthEnabled, openUserSession } from "@/lib/auth";
+import { ssoCookieHeader } from "@/lib/mworld-ecosystem";
 import { sessionCookieHeader, signSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,8 @@ export async function POST(req: Request) {
     if (!mauthEnabled()) return Response.json(body);
     const token = signSession(auth);
     const res = Response.json(body);
-    res.headers.set("Set-Cookie", sessionCookieHeader(token));
+    res.headers.append("Set-Cookie", sessionCookieHeader(token));
+    res.headers.append("Set-Cookie", ssoCookieHeader(token, req));
     return res;
   } catch (error) {
     return jsonError(error);

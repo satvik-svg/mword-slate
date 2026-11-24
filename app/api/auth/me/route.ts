@@ -1,4 +1,5 @@
 import { jsonError, mauthEnabled, requireAuth, sessionFromRequest } from "@/lib/auth";
+import { ssoCookieHeader } from "@/lib/mworld-ecosystem";
 import { sessionCookieHeader, signSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,9 @@ export async function GET(req: Request) {
     };
     const res = Response.json(body);
     if (!sessionFromRequest(req)) {
-      res.headers.set("Set-Cookie", sessionCookieHeader(signSession(auth)));
+      const token = signSession(auth);
+      res.headers.append("Set-Cookie", sessionCookieHeader(token));
+      res.headers.append("Set-Cookie", ssoCookieHeader(token, req));
     }
     return res;
   } catch (error) {

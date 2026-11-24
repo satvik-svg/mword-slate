@@ -569,6 +569,17 @@ export function ShareModal({
               {saveState === "saving" ? "Saving…" : copied ? "Copied" : "Copy"}
             </button>
           </div>
+          <div className="mt-2.5 flex items-center justify-between gap-2">
+            <a
+              href={`https://chat.mworld.tech/chat?share=${encodeURIComponent(shareUrl)}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => void copyLink()}
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs font-semibold text-[var(--fg)] hover:bg-[var(--surface-3)]"
+            >
+              Share to mWorld Chat (copies link)
+            </a>
+          </div>
         </div>
       </div>
     </div>

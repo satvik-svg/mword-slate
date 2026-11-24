@@ -50,6 +50,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { SlateMark } from "@/components/slate-logo";
+import { MWorldAppSwitcher } from "@/components/mworld-app-switcher";
 import { useAuth } from "@/components/auth-provider";
 import { initialsFromName, type CollabPeer } from "@/lib/collab";
 import { GOOGLE_FONTS } from "@/lib/presets";
@@ -226,6 +227,7 @@ export function TopToolbar({
             <ArrowLeft className="h-4 w-4" />
             <SlateMark size={22} />
           </Link>
+          <MWorldAppSwitcher currentApp="slate" compact />
 
           <div className="h-5 w-px bg-[var(--border)]" />
 

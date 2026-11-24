@@ -6,6 +6,9 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "upload_source_maps": true,
+  "routes": [
+    { "pattern": "slate.mworld.tech", "custom_domain": true }
+  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -27,13 +30,26 @@
       "new_sqlite_classes": ["SlateDB"]
     }
   ],
+  "services": [
+    { "binding": "CHAT_SVC", "service": "mworld-whatsapp" },
+    { "binding": "CALENDAR_SVC", "service": "mworld-calendar" },
+    { "binding": "ROOM_SVC", "service": "mworld-room" },
+    { "binding": "PAPER_SVC", "service": "mworld-notion" },
+    { "binding": "BOARD_SVC", "service": "mworld-board" }
+  ],
   "vars": {
     "MAUTH_ENABLED": "true",
     "MAUTH_API_URL": "https://api.mauth.mworld.cloud",
     "MAUTH_VERIFY_URL": "https://api.mauth.mworld.cloud/mAuthAG/verifyToken",
-    "APP_ORIGIN": "https://slate.laflabs-tech.workers.dev",
+    "APP_ORIGIN": "https://slate.mworld.tech",
     "MAUTH_APP_NAME": "Slate",
     "MAUTH_BI_ID": "bi-1c9dc4ca-012b-40c3-a44c-0cab72c20779Nov2026",
-    "MAUTH_LOGO_URL": "https://slate.laflabs-tech.workers.dev/icon.svg"
+    "MAUTH_LOGO_URL": "https://slate.mworld.tech/icon.svg",
+    "CHAT_APP_URL": "https://chat.mworld.tech",
+    "CALENDAR_APP_URL": "https://cal.mworld.tech",
+    "ROOM_APP_URL": "https://room.mworld.tech",
+    "PAPER_APP_URL": "https://paper.mworld.tech",
+    "BOARD_APP_URL": "https://board.mworld.tech",
+    "SLATE_APP_URL": "https://slate.mworld.tech"
   }
 }

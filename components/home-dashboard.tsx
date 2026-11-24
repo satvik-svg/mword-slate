@@ -30,6 +30,7 @@ import { useAuth } from "@/components/auth-provider";
 import { BrandKitView } from "@/components/brand-kit-view";
 import { PagePreview } from "@/components/page-preview";
 import { SlateWordmark } from "@/components/slate-logo";
+import { MWorldAppSwitcher } from "@/components/mworld-app-switcher";
 import { syncCustomFonts } from "@/lib/custom-fonts";
 import { generateThumbnail } from "@/lib/exporter";
 import { makeId } from "@/lib/id";
@@ -506,15 +507,18 @@ export function HomeDashboard() {
 
       {/* Left Sidebar */}
       <aside className="flex w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
-        <div className="flex h-14 items-center justify-between px-4">
+        <div className="flex h-14 items-center justify-between gap-2 px-4">
           <SlateWordmark size={24} />
-          <button
-            onClick={toggleTheme}
-            title="Toggle appearance"
-            className="rounded-md p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
-          >
-            {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-          </button>
+          <div className="flex items-center gap-1">
+            <MWorldAppSwitcher currentApp="slate" compact />
+            <button
+              onClick={toggleTheme}
+              title="Toggle appearance"
+              className="rounded-md p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)] cursor-pointer"
+            >
+              {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            </button>
+          </div>
         </div>
 
         <div className="px-3 pb-3">

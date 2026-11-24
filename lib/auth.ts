@@ -10,6 +10,7 @@ import {
   validateMAuthLink,
   type MAuthOptionsInput,
 } from "@/lib/mauth";
+import { MWORLD_SSO_COOKIE } from "@/lib/mworld-ecosystem";
 import { readCookie, readSessionToken, SESSION_COOKIE, type SessionClaims } from "@/lib/session";
 import { tenantFromIdentity } from "@/lib/tenant";
 
@@ -111,11 +112,13 @@ function claimsToAuth(claims: SessionClaims): AuthContext {
 }
 
 export function sessionFromRequest(req: Request): AuthContext | null {
-  const token = readCookie(req, SESSION_COOKIE);
-  if (!token) return null;
-  const claims = readSessionToken(token);
-  if (!claims) return null;
-  return claimsToAuth(claims);
+  for (const name of [MWORLD_SSO_COOKIE, SESSION_COOKIE]) {
+    const token = readCookie(req, name);
+    if (!token) continue;
+    const claims = readSessionToken(token);
+    if (claims) return claimsToAuth(claims);
+  }
+  return null;
 }
 
 export async function userTokenFromRequest(req: Request): Promise<string> {
