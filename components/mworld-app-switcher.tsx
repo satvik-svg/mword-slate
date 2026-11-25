@@ -134,7 +134,7 @@ export function MWorldAppSwitcher({
             className={isDark ? "dark" : ""}
             style={{ position: "fixed", top: coords.top, left: coords.left, width: coords.width, zIndex: 9998 }}
           >
-            <div className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-3 shadow-2xl backdrop-blur-xl">
+            <div className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 shadow-2xl">
               <div className="flex items-center justify-between px-1.5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
                 <span>MWorld Suite</span>
               </div>
