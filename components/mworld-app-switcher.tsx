@@ -2,29 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { MWorldAppIcon, type MWorldAppKey } from "./mworld-app-icon";
 import { MWorldCommandBar } from "./mworld-command-bar";
 
-type AppKey = "chat" | "calendar" | "room" | "paper" | "board" | "slate";
-
 const APPS: {
-  key: AppKey;
+  key: MWorldAppKey;
   name: string;
   desc: string;
   prodUrl: string;
   localPort: number;
-  badge: string;
-  color: string;
 }[] = [
-  { key: "chat", name: "mWorld Chat", desc: "Messages & calls", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300, badge: "C", color: "#0d9488" },
-  { key: "calendar", name: "Calendar", desc: "Events & booking", prodUrl: "https://cal.mworld.tech", localPort: 3100, badge: "Cal", color: "#2563eb" },
-  { key: "room", name: "Room", desc: "Video meetings", prodUrl: "https://room.mworld.tech", localPort: 3400, badge: "R", color: "#059669" },
-  { key: "paper", name: "Paper", desc: "Docs & databases", prodUrl: "https://paper.mworld.tech", localPort: 3200, badge: "P", color: "#27272a" },
-  { key: "board", name: "Board", desc: "Whiteboards", prodUrl: "https://board.mworld.tech", localPort: 3120, badge: "B", color: "#7c3aed" },
-  { key: "slate", name: "Slate", desc: "Visual studio", prodUrl: "https://slate.mworld.tech", localPort: 3500, badge: "S", color: "#db2777" },
+  { key: "chat", name: "MChat", desc: "Messages & calls", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300 },
+  { key: "calendar", name: "Calendar", desc: "Events & booking", prodUrl: "https://cal.mworld.tech", localPort: 3100 },
+  { key: "room", name: "Room", desc: "Video meetings", prodUrl: "https://room.mworld.tech", localPort: 3400 },
+  { key: "paper", name: "Paper", desc: "Docs & wikis", prodUrl: "https://paper.mworld.tech", localPort: 3200 },
+  { key: "board", name: "Board", desc: "Whiteboards", prodUrl: "https://board.mworld.tech", localPort: 3120 },
+  { key: "slate", name: "Slate", desc: "Visual studio", prodUrl: "https://slate.mworld.tech", localPort: 3500 },
 ];
 
-const POPOVER_W = 288;
-const POPOVER_H = 260;
+const POPOVER_W = 356;
+const POPOVER_H = 290;
 
 function appHref(app: (typeof APPS)[number]): string {
   if (typeof window !== "undefined") {
@@ -41,7 +38,7 @@ export function MWorldAppSwitcher({
   compact = false,
   align = "left",
 }: {
-  currentApp: AppKey;
+  currentApp: MWorldAppKey;
   compact?: boolean;
   align?: "left" | "right";
 }) {
@@ -49,7 +46,11 @@ export function MWorldAppSwitcher({
   const [cmdOpen, setCmdOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isDark, setIsDark] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 56, left: 12 });
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number }>({
+    top: 56,
+    left: 12,
+    width: POPOVER_W,
+  });
   const wrapRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -57,31 +58,38 @@ export function MWorldAppSwitcher({
     setMounted(true);
   }, []);
 
+  const detectDark = useCallback(() => {
+    const anchor = wrapRef.current;
+    return (
+      currentApp === "calendar" ||
+      Boolean(
+        anchor?.closest('[data-theme="dark"], .dark') ||
+          document.documentElement.classList.contains("dark") ||
+          document.documentElement.dataset.theme === "dark",
+      )
+    );
+  }, [currentApp]);
+
   const syncPosition = useCallback(() => {
     const anchor = wrapRef.current;
     if (!anchor || typeof window === "undefined") return;
     const rect = anchor.getBoundingClientRect();
-    const preferredLeft = align === "right" ? rect.right - POPOVER_W : rect.left;
-    const left = Math.max(12, Math.min(preferredLeft, window.innerWidth - POPOVER_W - 12));
+    const width = Math.min(POPOVER_W, window.innerWidth - 24);
+    const preferredLeft = align === "right" ? rect.right - width : rect.left;
+    const left = Math.max(12, Math.min(preferredLeft, window.innerWidth - width - 12));
     const top =
       rect.bottom + 8 + POPOVER_H > window.innerHeight - 12
         ? Math.max(12, rect.top - POPOVER_H - 8)
         : rect.bottom + 8;
-    setCoords({ top, left });
-    const dark =
-      currentApp === "calendar" ||
-      Boolean(
-        anchor.closest('[data-theme="dark"], .dark') ||
-          document.documentElement.classList.contains("dark") ||
-          document.documentElement.dataset.theme === "dark",
-      );
-    setIsDark(dark);
-  }, [align, currentApp]);
+    setCoords({ top, left, width });
+    setIsDark(detectDark());
+  }, [align, detectDark]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        setIsDark(detectDark());
         setCmdOpen((v) => !v);
       }
       if (e.key === "Escape") {
@@ -90,7 +98,7 @@ export function MWorldAppSwitcher({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [detectDark]);
 
   useEffect(() => {
     if (!open) return;
@@ -124,23 +132,14 @@ export function MWorldAppSwitcher({
             ref={popoverRef}
             data-theme={isDark ? "dark" : "light"}
             className={isDark ? "dark" : ""}
-            style={{ position: "fixed", top: coords.top, left: coords.left, width: POPOVER_W, zIndex: 9998 }}
+            style={{ position: "fixed", top: coords.top, left: coords.left, width: coords.width, zIndex: 9998 }}
           >
-            <div className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-2.5 shadow-2xl backdrop-blur-xl">
-              <div className="flex items-center justify-between px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+            <div className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-3 shadow-2xl backdrop-blur-xl">
+              <div className="flex items-center justify-between px-1.5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
                 <span>MWorld Suite</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    setCmdOpen(true);
-                  }}
-                  className="text-[11px] font-medium normal-case text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-                >
-                  Search (⌘K)
-                </button>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+
+              <div className="grid grid-cols-2 gap-1.5">
                 {APPS.map((app) => {
                   const active = app.key === currentApp;
                   return (
@@ -150,29 +149,48 @@ export function MWorldAppSwitcher({
                       target={active ? undefined : "_blank"}
                       rel={active ? undefined : "noopener noreferrer"}
                       onClick={() => setOpen(false)}
-                      className={`flex items-center gap-2.5 rounded-xl p-2 text-left transition-colors ${
+                      className={`group flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-colors ${
                         active
-                          ? "bg-zinc-100 dark:bg-zinc-800 ring-1 ring-zinc-300 dark:ring-zinc-700"
-                          : "hover:bg-zinc-100/70 dark:hover:bg-zinc-800/70"
+                          ? "bg-zinc-100/90 dark:bg-white/[0.08]"
+                          : "hover:bg-zinc-100/70 dark:hover:bg-white/[0.05]"
                       }`}
                     >
-                      <span
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold text-white"
-                        style={{ backgroundColor: app.color }}
-                      >
-                        {app.badge}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                          {app.name}
+                      <MWorldAppIcon app={app.key} size={36} className="shadow-xs" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-[13px] font-semibold leading-tight text-zinc-900 dark:text-zinc-100">
+                          <span className="truncate">{app.name}</span>
+                          {active && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />}
                         </div>
-                        <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+                        <div className="mt-0.5 truncate text-[11px] leading-tight text-zinc-500 dark:text-zinc-400">
                           {app.desc}
                         </div>
                       </div>
                     </a>
                   );
                 })}
+              </div>
+
+              <div className="mt-2.5 border-t border-zinc-200/80 dark:border-zinc-800 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    setIsDark(detectDark());
+                    setCmdOpen(true);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.06] transition-colors cursor-pointer"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <svg className="h-3.5 w-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="11" cy="11" r="8" />
+                      <path d="m21 21-4.3-4.3" />
+                    </svg>
+                    Search across MWorld
+                  </span>
+                  <kbd className="rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-1.5 py-0.5 text-[10px] font-sans text-zinc-500 dark:text-zinc-400">
+                    ⌘K
+                  </kbd>
+                </button>
               </div>
             </div>
           </div>,
@@ -210,7 +228,10 @@ export function MWorldAppSwitcher({
         {!compact && (
           <button
             type="button"
-            onClick={() => setCmdOpen(true)}
+            onClick={() => {
+              setIsDark(detectDark());
+              setCmdOpen(true);
+            }}
             title="Search all MWorld apps (⌘K)"
             className={`inline-flex ${shapeClass} items-center gap-1.5 border border-zinc-200/90 dark:border-zinc-700/80 bg-white/90 dark:bg-zinc-900/80 text-xs text-zinc-500 dark:text-zinc-400 shadow-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer`}
           >
@@ -224,7 +245,7 @@ export function MWorldAppSwitcher({
       </div>
 
       {popover}
-      <MWorldCommandBar open={cmdOpen} onClose={() => setCmdOpen(false)} />
+      <MWorldCommandBar open={cmdOpen} onClose={() => setCmdOpen(false)} isDark={isDark} />
     </>
   );
 }

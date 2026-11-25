@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-
-type AppKey = "chat" | "calendar" | "room" | "paper" | "board" | "slate";
+import { MWorldAppIcon, type MWorldAppKey } from "./mworld-app-icon";
 
 type SearchHit = {
-  app: AppKey;
+  app: MWorldAppKey;
   appName: string;
   id: string;
   title: string;
@@ -14,23 +13,37 @@ type SearchHit = {
   url: string;
 };
 
-const APP_BADGE: Record<AppKey, { label: string; short: string; bg: string }> = {
-  chat: { label: "Chat", short: "C", bg: "#0d9488" },
-  calendar: { label: "Calendar", short: "Cal", bg: "#2563eb" },
-  room: { label: "Room", short: "R", bg: "#059669" },
-  paper: { label: "Paper", short: "P", bg: "#27272a" },
-  board: { label: "Board", short: "B", bg: "#7c3aed" },
-  slate: { label: "Slate", short: "S", bg: "#db2777" },
+const APP_LABEL: Record<MWorldAppKey, string> = {
+  chat: "MChat",
+  calendar: "Calendar",
+  room: "Room",
+  paper: "Paper",
+  board: "Board",
+  slate: "Slate",
 };
 
-const QUICK_APPS: { key: AppKey; name: string; prodUrl: string; localPort: number }[] = [
-  { key: "chat", name: "Chat", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300 },
+const QUICK_APPS: { key: MWorldAppKey; name: string; prodUrl: string; localPort: number }[] = [
+  { key: "chat", name: "MChat", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300 },
   { key: "calendar", name: "Calendar", prodUrl: "https://cal.mworld.tech", localPort: 3100 },
   { key: "room", name: "Room", prodUrl: "https://room.mworld.tech", localPort: 3400 },
   { key: "paper", name: "Paper", prodUrl: "https://paper.mworld.tech", localPort: 3200 },
   { key: "board", name: "Board", prodUrl: "https://board.mworld.tech", localPort: 3120 },
   { key: "slate", name: "Slate", prodUrl: "https://slate.mworld.tech", localPort: 3500 },
 ];
+
+function normalizeAppKey(app: string | undefined): MWorldAppKey {
+  if (
+    app === "chat" ||
+    app === "calendar" ||
+    app === "room" ||
+    app === "paper" ||
+    app === "board" ||
+    app === "slate"
+  ) {
+    return app;
+  }
+  return "chat";
+}
 
 function quickHref(app: (typeof QUICK_APPS)[number]): string {
   if (typeof window !== "undefined") {
@@ -45,9 +58,11 @@ function quickHref(app: (typeof QUICK_APPS)[number]): string {
 export function MWorldCommandBar({
   open,
   onClose,
+  isDark,
 }: {
   open: boolean;
   onClose: () => void;
+  isDark?: boolean;
 }) {
   const [mounted, setMounted] = useState(false);
   const [query, setQuery] = useState("");
@@ -119,9 +134,20 @@ export function MWorldCommandBar({
 
   if (!open || !mounted || typeof document === "undefined") return null;
 
+  const resolvedDark =
+    isDark ??
+    Boolean(
+      document.documentElement.classList.contains("dark") ||
+        document.documentElement.dataset.theme === "dark" ||
+        document.querySelector('[data-theme="dark"]'),
+    );
+
   const modal = (
     <div
-      className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/60 backdrop-blur-md pt-[12vh] px-4 animate-in fade-in duration-150"
+      data-theme={resolvedDark ? "dark" : "light"}
+      className={`fixed inset-0 z-[9999] flex items-start justify-center bg-black/60 backdrop-blur-md pt-[12vh] px-4 ${
+        resolvedDark ? "dark" : ""
+      }`}
       onMouseDown={onClose}
       role="dialog"
       aria-modal="true"
@@ -162,7 +188,7 @@ export function MWorldCommandBar({
                 onClose();
               }
             }}
-            placeholder="Search Chat, Calendar, Room, Paper, Board, and Slate…"
+            placeholder="Search MChat, Calendar, Room, Paper, Board, and Slate…"
             className="w-full bg-transparent text-[15px] outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
           />
           {query ? (
@@ -186,27 +212,19 @@ export function MWorldCommandBar({
                 Jump to app
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {QUICK_APPS.map((app) => {
-                  const badge = APP_BADGE[app.key];
-                  return (
-                    <a
-                      key={app.key}
-                      href={quickHref(app)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={onClose}
-                      className="flex items-center gap-2.5 rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 px-3 py-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    >
-                      <span
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold text-white"
-                        style={{ backgroundColor: badge.bg }}
-                      >
-                        {badge.short}
-                      </span>
-                      <span className="text-xs font-semibold">{app.name}</span>
-                    </a>
-                  );
-                })}
+                {QUICK_APPS.map((app) => (
+                  <a
+                    key={app.key}
+                    href={quickHref(app)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={onClose}
+                    className="flex items-center gap-2.5 rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 px-3 py-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <MWorldAppIcon app={app.key} size={28} />
+                    <span className="text-xs font-semibold">{app.name}</span>
+                  </a>
+                ))}
               </div>
               <div className="pt-1 text-center text-[11px] text-zinc-400">
                 Start typing to search across all 6 apps · ↑↓ to navigate · ↵ to open
@@ -223,7 +241,8 @@ export function MWorldCommandBar({
           ) : (
             <div className="space-y-1">
               {results.map((hit, idx) => {
-                const badge = APP_BADGE[hit.app] ?? { label: hit.appName, short: "M", bg: "#3f3f46" };
+                const appKey = normalizeAppKey(hit.app);
+                const appLabel = APP_LABEL[appKey] || hit.appName;
                 const active = idx === activeIndex;
                 return (
                   <a
@@ -240,17 +259,13 @@ export function MWorldCommandBar({
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <span
-                        className="inline-flex h-7 min-w-[3.25rem] shrink-0 items-center justify-center rounded-lg px-2 text-[11px] font-semibold text-white"
-                        style={{ backgroundColor: badge.bg }}
-                      >
-                        {badge.label}
-                      </span>
+                      <MWorldAppIcon app={appKey} size={28} />
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{hit.title}</div>
-                        {hit.subtitle ? (
-                          <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{hit.subtitle}</div>
-                        ) : null}
+                        <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                          {appLabel}
+                          {hit.subtitle ? ` · ${hit.subtitle}` : ""}
+                        </div>
                       </div>
                     </div>
                     <span className="shrink-0 text-[11px] font-medium text-zinc-400">
