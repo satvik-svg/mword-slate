@@ -12,12 +12,12 @@ const APPS: {
   prodUrl: string;
   localPort: number;
 }[] = [
-  { key: "chat", name: "MChat", desc: "Team chat", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300 },
-  { key: "calendar", name: "Calendar", desc: "Schedule", prodUrl: "https://cal.mworld.tech", localPort: 3100 },
-  { key: "room", name: "Room", desc: "Meetings", prodUrl: "https://room.mworld.tech", localPort: 3400 },
-  { key: "paper", name: "Paper", desc: "Docs & wiki", prodUrl: "https://paper.mworld.tech", localPort: 3200 },
-  { key: "board", name: "Board", desc: "Whiteboard", prodUrl: "https://board.mworld.tech", localPort: 3120 },
-  { key: "slate", name: "Slate", desc: "Studio", prodUrl: "https://slate.mworld.tech", localPort: 3500 },
+  { key: "chat", name: "MChat", desc: "Team chat", prodUrl: "https://mworld-whatsapp.laflabs-tech.workers.dev/chat", localPort: 3300 },
+  { key: "calendar", name: "Calendar", desc: "Schedule", prodUrl: "https://mworld-calendar.laflabs-tech.workers.dev", localPort: 3100 },
+  { key: "room", name: "Room", desc: "Meetings", prodUrl: "https://mworld-room.laflabs-tech.workers.dev", localPort: 3400 },
+  { key: "paper", name: "Paper", desc: "Docs & wiki", prodUrl: "https://mworld-notion.laflabs-tech.workers.dev", localPort: 3200 },
+  { key: "board", name: "Board", desc: "Whiteboard", prodUrl: "https://mworld-board.laflabs-tech.workers.dev", localPort: 3120 },
+  { key: "slate", name: "Slate", desc: "Studio", prodUrl: "https://slate.laflabs-tech.workers.dev", localPort: 3500 },
   { key: "anyfile", name: "AnyFile", desc: "File tools", prodUrl: "https://anyfile.laflabs-tech.workers.dev", localPort: 3000 },
   { key: "clipnote", name: "Clipnote", desc: "Screen video", prodUrl: "https://clipnote.laflabs-tech.workers.dev", localPort: 8787 },
   { key: "sharexe", name: "shareXe", desc: "Quick share", prodUrl: "https://mworld-sharexe.laflabs-tech.workers.dev", localPort: 3600 },

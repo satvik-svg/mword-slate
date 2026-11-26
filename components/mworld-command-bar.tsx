@@ -26,12 +26,12 @@ const APP_LABEL: Record<MWorldAppKey, string> = {
 };
 
 const QUICK_APPS: { key: MWorldAppKey; name: string; prodUrl: string; localPort: number }[] = [
-  { key: "chat", name: "MChat", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300 },
-  { key: "calendar", name: "Calendar", prodUrl: "https://cal.mworld.tech", localPort: 3100 },
-  { key: "room", name: "Room", prodUrl: "https://room.mworld.tech", localPort: 3400 },
-  { key: "paper", name: "Paper", prodUrl: "https://paper.mworld.tech", localPort: 3200 },
-  { key: "board", name: "Board", prodUrl: "https://board.mworld.tech", localPort: 3120 },
-  { key: "slate", name: "Slate", prodUrl: "https://slate.mworld.tech", localPort: 3500 },
+  { key: "chat", name: "MChat", prodUrl: "https://mworld-whatsapp.laflabs-tech.workers.dev/chat", localPort: 3300 },
+  { key: "calendar", name: "Calendar", prodUrl: "https://mworld-calendar.laflabs-tech.workers.dev", localPort: 3100 },
+  { key: "room", name: "Room", prodUrl: "https://mworld-room.laflabs-tech.workers.dev", localPort: 3400 },
+  { key: "paper", name: "Paper", prodUrl: "https://mworld-notion.laflabs-tech.workers.dev", localPort: 3200 },
+  { key: "board", name: "Board", prodUrl: "https://mworld-board.laflabs-tech.workers.dev", localPort: 3120 },
+  { key: "slate", name: "Slate", prodUrl: "https://slate.laflabs-tech.workers.dev", localPort: 3500 },
   { key: "anyfile", name: "AnyFile", prodUrl: "https://anyfile.laflabs-tech.workers.dev", localPort: 3000 },
   { key: "clipnote", name: "Clipnote", prodUrl: "https://clipnote.laflabs-tech.workers.dev", localPort: 8787 },
   { key: "sharexe", name: "shareXe", prodUrl: "https://mworld-sharexe.laflabs-tech.workers.dev", localPort: 3600 },

@@ -571,7 +571,7 @@ export function ShareModal({
           </div>
           <div className="mt-2.5 flex items-center justify-between gap-2">
             <a
-              href={`https://chat.mworld.tech/chat?share=${encodeURIComponent(shareUrl)}`}
+              href={`https://mworld-whatsapp.laflabs-tech.workers.dev/chat?share=${encodeURIComponent(shareUrl)}`}
               target="_blank"
               rel="noreferrer"
               onClick={() => void copyLink()}
