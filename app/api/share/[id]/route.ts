@@ -1,4 +1,5 @@
 import { jsonError, optionalAuth } from "@/lib/auth";
+import { verifyEmbedToken } from "@/lib/mworld-ecosystem";
 import { extractReferencedCustomFonts, mergeGuestComments } from "@/lib/share-helpers";
 import { getBrandKit, getDesignById, updateSharedDesignById } from "@/lib/store";
 import type { DesignComment, DesignPage, DesignVersion } from "@/lib/types";
@@ -32,8 +33,21 @@ function resolveAccess(
 
 export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await optionalAuth(req);
+    let auth = await optionalAuth(req);
     const { id } = await context.params;
+    if (!auth) {
+      const et = new URL(req.url).searchParams.get("et");
+      const ecoUser = await verifyEmbedToken(et, "slate", id);
+      if (ecoUser) {
+        auth = {
+          biId: ecoUser.biId,
+          email: ecoUser.email,
+          displayName: ecoUser.displayName,
+          personKey: ecoUser.personKey,
+          entityType: ecoUser.entityType,
+        };
+      }
+    }
     const found = await getDesignById(id);
     if (!found || found.record.trashed) {
       return Response.json({ error: "Shared design not found" }, { status: 404 });

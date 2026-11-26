@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 export type MWorldAppKey = "chat" | "calendar" | "room" | "paper" | "board" | "slate";
@@ -179,26 +179,31 @@ export function encodeMWorldUserHeader(user: MWorldUserContext): string {
   return Buffer.from(JSON.stringify(user), "utf8").toString("base64url");
 }
 
+function normalizeUserContext(raw: unknown): MWorldUserContext | null {
+  if (!raw || typeof raw !== "object") return null;
+  const parsed = raw as Partial<MWorldUserContext>;
+  const biId = typeof parsed.biId === "string" ? parsed.biId.trim() : "";
+  const email = typeof parsed.email === "string" ? parsed.email.trim().toLowerCase() : "";
+  const personKey = typeof parsed.personKey === "string" ? parsed.personKey.trim() : email || biId;
+  const displayName = typeof parsed.displayName === "string" ? parsed.displayName.trim() : email || "mWorld user";
+  const entityType = parsed.entityType === "agent" ? "agent" : "user";
+  if (!biId && !email && !personKey) return null;
+  return {
+    biId: biId || (email ? `personal:${email}` : personKey),
+    personKey: personKey || email || biId,
+    displayName,
+    email,
+    entityType,
+    userId: typeof parsed.userId === "string" ? parsed.userId : undefined,
+    sid: typeof parsed.sid === "string" ? parsed.sid : undefined,
+  };
+}
+
 export function decodeMWorldUserHeader(raw: string | null): MWorldUserContext | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<MWorldUserContext>;
-    if (!parsed || typeof parsed !== "object") return null;
-    const biId = typeof parsed.biId === "string" ? parsed.biId.trim() : "";
-    const email = typeof parsed.email === "string" ? parsed.email.trim().toLowerCase() : "";
-    const personKey = typeof parsed.personKey === "string" ? parsed.personKey.trim() : email || biId;
-    const displayName = typeof parsed.displayName === "string" ? parsed.displayName.trim() : email || "mWorld user";
-    const entityType = parsed.entityType === "agent" ? "agent" : "user";
-    if (!biId && !email && !personKey) return null;
-    return {
-      biId: biId || (email ? `personal:${email}` : personKey),
-      personKey: personKey || email || biId,
-      displayName,
-      email,
-      entityType,
-      userId: typeof parsed.userId === "string" ? parsed.userId : undefined,
-      sid: typeof parsed.sid === "string" ? parsed.sid : undefined,
-    };
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    return normalizeUserContext(parsed);
   } catch {
     return null;
   }
@@ -210,6 +215,73 @@ function safeEqual(a: string, b: string): boolean {
   const right = Buffer.from(b);
   if (left.length !== right.length) return false;
   return timingSafeEqual(left, right);
+}
+
+export type EmbedAppKey = "board" | "slate";
+
+type EmbedTokenPayload = {
+  app: EmbedAppKey;
+  resourceId: string;
+  user: MWorldUserContext;
+  exp: number;
+};
+
+/** Sign a short-lived HMAC token authorizing a cross-origin embed iframe without cookies. */
+export async function signEmbedToken(
+  app: EmbedAppKey,
+  resourceId: string,
+  user: MWorldUserContext,
+  ttlMs = 2 * 60 * 60 * 1000,
+): Promise<string | null> {
+  const cleanId = resourceId.trim();
+  if (!cleanId) return null;
+  const normalizedUser = normalizeUserContext(user);
+  if (!normalizedUser) return null;
+  const cfEnv = await getCloudflareEnv();
+  const secret = resolveEcosystemSecret(cfEnv);
+  if (!secret) return null;
+  const payload: EmbedTokenPayload = {
+    app,
+    resourceId: cleanId,
+    user: normalizedUser,
+    exp: Date.now() + ttlMs,
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const sig = createHmac("sha256", secret).update(encoded).digest("base64url");
+  return `${encoded}.${sig}`;
+}
+
+/** Verify a short-lived HMAC embed token scoped to a specific app and resource ID. */
+export async function verifyEmbedToken(
+  token: string | null | undefined,
+  expectedApp: EmbedAppKey,
+  expectedResourceId: string,
+): Promise<MWorldUserContext | null> {
+  const raw = typeof token === "string" ? token.trim() : "";
+  const cleanId = expectedResourceId.trim();
+  if (!raw || !cleanId) return null;
+  const dot = raw.indexOf(".");
+  if (dot <= 0 || raw.indexOf(".", dot + 1) !== -1) return null;
+  const encoded = raw.slice(0, dot);
+  const sig = raw.slice(dot + 1);
+  if (!encoded || !sig) return null;
+
+  const cfEnv = await getCloudflareEnv();
+  const secret = resolveEcosystemSecret(cfEnv);
+  if (!secret) return null;
+  const expectedSig = createHmac("sha256", secret).update(encoded).digest("base64url");
+  if (!safeEqual(sig, expectedSig)) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Partial<EmbedTokenPayload>;
+    if (!payload || typeof payload !== "object") return null;
+    if (payload.app !== expectedApp) return null;
+    if (payload.resourceId !== cleanId) return null;
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || payload.exp <= Date.now()) return null;
+    return normalizeUserContext(payload.user);
+  } catch {
+    return null;
+  }
 }
 
 export async function verifyEcosystemRequest(

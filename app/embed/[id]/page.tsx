@@ -24,7 +24,11 @@ export default function SlateEmbedPage({
     let active = true;
     async function load() {
       try {
-        const res = await fetch(`/api/share/${encodeURIComponent(id)}`, { credentials: "include" });
+        const et = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("et") ?? "" : "";
+        const apiUrl = et
+          ? `/api/share/${encodeURIComponent(id)}?et=${encodeURIComponent(et)}`
+          : `/api/share/${encodeURIComponent(id)}`;
+        const res = await fetch(apiUrl, { credentials: "include" });
         const data = (await res.json().catch(() => ({}))) as {
           design?: DesignRecord;
           customFonts?: CustomFontItem[];
