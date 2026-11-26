@@ -2,7 +2,16 @@
 
 import { useId, type CSSProperties } from "react";
 
-export type MWorldAppKey = "chat" | "calendar" | "room" | "paper" | "board" | "slate";
+export type MWorldAppKey =
+  | "chat"
+  | "calendar"
+  | "room"
+  | "paper"
+  | "board"
+  | "slate"
+  | "anyfile"
+  | "clipnote"
+  | "sharexe";
 
 export function MWorldAppIcon({
   app,
@@ -157,6 +166,100 @@ export function MWorldAppIcon({
         <rect x="14" y="43" width="9" height="7" rx="2" fill="#E2E8F0" />
         <rect x="27.5" y="43" width="9" height="7" rx="2" fill="#E2E8F0" />
         <rect x="41" y="43" width="9" height="7" rx="2" fill="#93C5FD" />
+      </svg>
+    );
+  }
+
+  if (app === "anyfile") {
+    const gradId = `manyfile-grad-${uid}`;
+    return (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 64 64"
+        fill="none"
+        className={`shrink-0 ${className}`}
+        {...shared}
+      >
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#14B8A6" />
+            <stop offset="100%" stopColor="#0F766E" />
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="16" fill={`url(#${gradId})`} />
+        <path
+          d="M18 13H36L48 25V51H18V13Z"
+          stroke="#FFFFFF"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M36 13V25H48"
+          stroke="#FFFFFF"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M25 44L33 27L41 44M27.5 39H38.5"
+          stroke="#FFFFFF"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  if (app === "clipnote") {
+    const gradId = `mclipnote-grad-${uid}`;
+    return (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 64 64"
+        fill="none"
+        className={`shrink-0 ${className}`}
+        {...shared}
+      >
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#DB2777" />
+            <stop offset="100%" stopColor="#9D174D" />
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="16" fill={`url(#${gradId})`} />
+        <rect x="11" y="16" width="31" height="32" rx="8" fill="#FFFFFF" />
+        <path d="M44 26L54 19.5V44.5L44 38V26Z" fill="rgba(255,255,255,0.9)" />
+        <path d="M23 24.5L34 32L23 39.5V24.5Z" fill="#B8336A" />
+      </svg>
+    );
+  }
+
+  if (app === "sharexe") {
+    return (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 64 64"
+        fill="none"
+        className={`shrink-0 ${className}`}
+        {...shared}
+      >
+        <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="15.25" fill="#F0F9FF" stroke="#BAE6FD" strokeWidth="1.5" />
+        <path
+          d="M15 24.5H43L35.5 17"
+          stroke="#1A73E8"
+          strokeWidth="5.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M49 39.5H21L28.5 47"
+          stroke="#10B981"
+          strokeWidth="5.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     );
   }

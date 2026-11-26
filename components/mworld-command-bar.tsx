@@ -20,6 +20,9 @@ const APP_LABEL: Record<MWorldAppKey, string> = {
   paper: "Paper",
   board: "Board",
   slate: "Slate",
+  anyfile: "AnyFile",
+  clipnote: "Clipnote",
+  sharexe: "shareXe",
 };
 
 const QUICK_APPS: { key: MWorldAppKey; name: string; prodUrl: string; localPort: number }[] = [
@@ -29,6 +32,9 @@ const QUICK_APPS: { key: MWorldAppKey; name: string; prodUrl: string; localPort:
   { key: "paper", name: "Paper", prodUrl: "https://paper.mworld.tech", localPort: 3200 },
   { key: "board", name: "Board", prodUrl: "https://board.mworld.tech", localPort: 3120 },
   { key: "slate", name: "Slate", prodUrl: "https://slate.mworld.tech", localPort: 3500 },
+  { key: "anyfile", name: "AnyFile", prodUrl: "https://anyfile.laflabs-tech.workers.dev", localPort: 3000 },
+  { key: "clipnote", name: "Clipnote", prodUrl: "https://clipnote.laflabs-tech.workers.dev", localPort: 8787 },
+  { key: "sharexe", name: "shareXe", prodUrl: "https://mworld-sharexe.laflabs-tech.workers.dev", localPort: 3600 },
 ];
 
 function normalizeAppKey(app: string | undefined): MWorldAppKey {
@@ -38,7 +44,10 @@ function normalizeAppKey(app: string | undefined): MWorldAppKey {
     app === "room" ||
     app === "paper" ||
     app === "board" ||
-    app === "slate"
+    app === "slate" ||
+    app === "anyfile" ||
+    app === "clipnote" ||
+    app === "sharexe"
   ) {
     return app;
   }
@@ -154,7 +163,7 @@ export function MWorldCommandBar({
       aria-label="MWorld Global Search"
     >
       <div
-        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-zinc-200/80 dark:border-zinc-700/70 bg-white/95 dark:bg-zinc-900/95 text-zinc-900 dark:text-zinc-100 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-zinc-200/80 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.55)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-zinc-200/80 dark:border-zinc-800 px-4 py-3.5">
@@ -227,7 +236,7 @@ export function MWorldCommandBar({
                 ))}
               </div>
               <div className="pt-1 text-center text-[11px] text-zinc-400">
-                Start typing to search across all 6 apps · ↑↓ to navigate · ↵ to open
+                Start typing to search across MWorld · ↑↓ to navigate · ↵ to open
               </div>
             </div>
           ) : loading ? (

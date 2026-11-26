@@ -12,16 +12,19 @@ const APPS: {
   prodUrl: string;
   localPort: number;
 }[] = [
-  { key: "chat", name: "MChat", desc: "Messages & calls", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300 },
-  { key: "calendar", name: "Calendar", desc: "Events & booking", prodUrl: "https://cal.mworld.tech", localPort: 3100 },
-  { key: "room", name: "Room", desc: "Video meetings", prodUrl: "https://room.mworld.tech", localPort: 3400 },
-  { key: "paper", name: "Paper", desc: "Docs & wikis", prodUrl: "https://paper.mworld.tech", localPort: 3200 },
-  { key: "board", name: "Board", desc: "Whiteboards", prodUrl: "https://board.mworld.tech", localPort: 3120 },
-  { key: "slate", name: "Slate", desc: "Visual studio", prodUrl: "https://slate.mworld.tech", localPort: 3500 },
+  { key: "chat", name: "MChat", desc: "Team chat", prodUrl: "https://chat.mworld.tech/chat", localPort: 3300 },
+  { key: "calendar", name: "Calendar", desc: "Schedule", prodUrl: "https://cal.mworld.tech", localPort: 3100 },
+  { key: "room", name: "Room", desc: "Meetings", prodUrl: "https://room.mworld.tech", localPort: 3400 },
+  { key: "paper", name: "Paper", desc: "Docs & wiki", prodUrl: "https://paper.mworld.tech", localPort: 3200 },
+  { key: "board", name: "Board", desc: "Whiteboard", prodUrl: "https://board.mworld.tech", localPort: 3120 },
+  { key: "slate", name: "Slate", desc: "Studio", prodUrl: "https://slate.mworld.tech", localPort: 3500 },
+  { key: "anyfile", name: "AnyFile", desc: "File tools", prodUrl: "https://anyfile.laflabs-tech.workers.dev", localPort: 3000 },
+  { key: "clipnote", name: "Clipnote", desc: "Screen video", prodUrl: "https://clipnote.laflabs-tech.workers.dev", localPort: 8787 },
+  { key: "sharexe", name: "shareXe", desc: "Quick share", prodUrl: "https://mworld-sharexe.laflabs-tech.workers.dev", localPort: 3600 },
 ];
 
-const POPOVER_W = 356;
-const POPOVER_H = 290;
+const POPOVER_W = 344;
+const POPOVER_H = 368;
 
 function appHref(app: (typeof APPS)[number]): string {
   if (typeof window !== "undefined") {
@@ -139,7 +142,7 @@ export function MWorldAppSwitcher({
                 <span>MWorld Suite</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-3 gap-1.5">
                 {APPS.map((app) => {
                   const active = app.key === currentApp;
                   return (
@@ -149,19 +152,21 @@ export function MWorldAppSwitcher({
                       target={active ? undefined : "_blank"}
                       rel={active ? undefined : "noopener noreferrer"}
                       onClick={() => setOpen(false)}
-                      className={`group flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-colors ${
+                      className={`group relative flex flex-col items-center gap-1.5 rounded-xl px-2 py-2.5 text-center transition-colors ${
                         active
-                          ? "bg-zinc-100/90 dark:bg-white/[0.08]"
+                          ? "bg-zinc-100/95 dark:bg-white/[0.08]"
                           : "hover:bg-zinc-100/70 dark:hover:bg-white/[0.05]"
                       }`}
                     >
-                      <MWorldAppIcon app={app.key} size={36} className="shadow-xs" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 text-[13px] font-semibold leading-tight text-zinc-900 dark:text-zinc-100">
-                          <span className="truncate">{app.name}</span>
-                          {active && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />}
+                      {active && (
+                        <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      )}
+                      <MWorldAppIcon app={app.key} size={38} className="shadow-xs" />
+                      <div className="min-w-0 w-full">
+                        <div className="truncate text-[12.5px] font-semibold leading-tight text-zinc-900 dark:text-zinc-100">
+                          {app.name}
                         </div>
-                        <div className="mt-0.5 truncate text-[11px] leading-tight text-zinc-500 dark:text-zinc-400">
+                        <div className="mt-0.5 truncate text-[10.5px] leading-tight text-zinc-500 dark:text-zinc-400">
                           {app.desc}
                         </div>
                       </div>
